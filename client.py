@@ -75,8 +75,6 @@ private = RSAKey.exportKey();
 public_hash = hashlib.sha512(public);
 #public_hash = hasher.update(public);
 public_hash_hexdigest = public_hash.hexdigest();
-IV = b'N\xbcQ\xc6\xdaL\x8c\xdd';
-counter = Counter.new(64, prefix=IV);
 
 print("Your Public Key: %s" %public);
 print("Your Private Key: %s" %private);
@@ -193,8 +191,9 @@ while(True):
                 rusername = client_socket.recv(username_length).decode('utf-8');
                 message_header = client_socket.recv(HEADER_LENGTH);
                 message_length = int(message_header.decode('utf-8').strip());
-                message = client_socket.recv(message_length).decode('utf-8');
-                print(f"{rusername} > {message}");
+                message = client_socket.recv(message_length);
+                decrypted_message = AESDecrypt(key_256, message);
+                print(f"{rusername} > {decrypted_message.decode('utf-8')}");
                 prompt();
             except IOError as e:
                 if e.errno != errno.EAGAIN and e.errno != errno.EWOULDBLOCK:
@@ -208,6 +207,7 @@ while(True):
             message = sys.stdin.readline();
             if message:
                 message = message.encode('utf-8');
+                message = AESEncrypt(key_256, message);
                 message_header = f"{len(message):<{HEADER_LENGTH}}".encode('utf-8');
                 client_socket.send(message_header + message);
                 prompt();

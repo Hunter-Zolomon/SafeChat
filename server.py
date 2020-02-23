@@ -31,12 +31,15 @@ def receive_message(client_socket):
     except:
         return False;
 
-def broadcast(client_socket, message, type="byte"):
+def broadcast(client_socket, user, message, type="byte"):
     for socket in socket_list:
         if socket != server_socket and socket != client_socket:
             try:
                 #send(socket, message, type);
-                socket.send(message);
+                user_socket_key = aes_client_mapping[socket];
+                enc_message = AESEncrypt(user_socket_key, message);
+                enc_message_header = f"{len(enc_message):<{HEADER_LENGTH}}".encode('utf-8');
+                socket.send(user + enc_message_header + enc_message);
             except:
                 socket.close();
                 socket_list.remove(socket);
@@ -78,15 +81,13 @@ private = RSAkey.exportKey();
 public_hash = hashlib.sha512(public);
 #public_hash = hasher.update(public);
 public_hash_hexdigest = public_hash.hexdigest();
-IV = b'N\xbcQ\xc6\xdaL\x8c\xdd';
-counter = Counter.new(64, prefix=IV);
-ttwoByte = os.urandom(32);
-session = hashlib.sha512(ttwoByte);
-session_hexdigest = session.hexdigest();
+#ttwoByte = os.urandom(32);
+#session = hashlib.sha512(ttwoByte);
+#session_hexdigest = session.hexdigest();
 
 print("Server Public Key: %s" %public);
 print("Server Private Key: %s" %private);
-print("Server AESKey: %s" %session_hexdigest);
+#print("Server AESKey: %s" %session_hexdigest);
 
 IP = str(input("Enter Server IP Address: "));
 Port = int(input("Enter Socket Port: "));
@@ -106,6 +107,7 @@ except Exception as e:
 
 socket_list = [server_socket];
 client_dic = {};
+aes_client_mapping = {};
 
 print(colored("Server Connection Successfully Setup!", "green"));
 print(colored(f"Listening for connections on {IP}:{Port}...", "magenta"));
@@ -130,6 +132,11 @@ while(True):
             if tmphash == clientPublicHash:
                 print(colored("Client's Public Key and Public Key Hash Matched!", "blue"));
                 clientPublic = RSA.importKey(tmpClientPublic);
+                ttwoByte = os.urandom(32);
+                print("Client Server Map TTWoByte: %s" %ttwoByte);
+                session = hashlib.sha512(ttwoByte);
+                session_hexdigest = session.hexdigest();
+                aes_client_mapping[client_socket] = ttwoByte;
                 fSend = ttwoByte + ":0x0:".encode('utf-8') + session_hexdigest.encode('utf-8') + ":0x0:".encode('utf-8') + public_hash_hexdigest.encode('utf-8');
                 print(fSend);
                 print(" ");
@@ -164,21 +171,22 @@ while(True):
                         #client_msg = AESKey.encrypt(FLAG_READY.encode('utf-8'));
                         client_msg = AESEncrypt(key_256, FLAG_READY.encode('utf-8'));
                         send(client_socket, client_msg, "byte");
+                        print(colored("Waiting For Client's Username...", "blue"));
+                        user = receive_message(client_socket);
+                        if user is False:
+                            continue;
+                        socket_list.append(client_socket);
+                        client_dic[client_socket] = user;
+                        print("Accepted new connection from {}:{}, Username: {}".format(*client_address, user['data'].decode('utf-8')));
+                        literal = f"[{client_address[0]}:{client_address[1]}] Has Entered The Chat";
+                        literal = literal.encode('utf-8');
+                        literal_header = f"{len(literal):<{HEADER_LENGTH}}".encode('utf-8');
+                        #broadcast(client_socket, literal_header + literal);
+                    else:
+                        print(colored("Session Key From Client Does Not Match!", "red"));
             else:
                 print(colored("Could Not Match Client's Public Hash! Exiting...", "red"));
                 exit(1);
-            
-            print(colored("Waiting For Client's Username...", "blue"));
-            user = receive_message(client_socket);
-            if user is False:
-                continue;
-            socket_list.append(client_socket);
-            client_dic[client_socket] = user;
-            print("Accepted new connection from {}:{}, Username: {}".format(*client_address, user['data'].decode('utf-8')));
-            literal = f"[{client_address[0]}:{client_address[1]}] Has Entered The Chat";
-            literal = literal.encode('utf-8');
-            literal_header = f"{len(literal):<{HEADER_LENGTH}}".encode('utf-8');
-            #broadcast(client_socket, literal_header + literal);
         else:
             message = receive_message(socket);
             if message is False:
@@ -187,8 +195,11 @@ while(True):
                 del client_dic[socket];
                 continue;
             user = client_dic[socket];
-            print(f'Received message from {user["data"].decode("utf-8")}: {message["data"].decode("utf-8")}'); #removed ["data"] for user
-            broadcast(socket, user['header'] + user["data"] + message['header'] + message['data'], "byte");
+            user_key = aes_client_mapping[socket];
+            decrypted_message = AESDecrypt(user_key, message["data"]);
+            print(f'Received message from {user["data"].decode("utf-8")}: {decrypted_message.decode("utf-8")}'); #removed ["data"] for user
+            #broadcast(socket, user['header'] + user["data"] + message['header'] + message['data'], "byte");
+            broadcast(socket, user['header'] + user["data"], decrypted_message, "byte");
     for socket in exception_sockets:
         socket_list.remove(socket);
         del client_dic[socket];
