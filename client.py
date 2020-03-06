@@ -308,4 +308,9 @@ while(True):
                     message = AESEncrypt(key_256, message);
                     message_header = f"{len(message):<{HEADER_LENGTH}}".encode('utf-8');
                     client_socket.send(message_header + message);
-                    prompt();
+                   prompt();
+                message = message.encode('utf-8');
+                message = AESEncrypt(key_256, message);
+                message_header = f"{len(message):<{HEADER_LENGTH}}".encode('utf-8');
+                client_socket.send(message_header + message);
+                prompt();
