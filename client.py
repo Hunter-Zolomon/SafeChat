@@ -4,11 +4,79 @@ import select;
 import errno;
 import sys;
 import os;
+import pyaudio;
+import threading;
 from Crypto import Random;
 from Crypto.PublicKey import RSA;
 from Crypto.Util import Counter;
 import hashlib;
 from termcolor import colored;
+
+class VoIP:
+    _chunk_size = 1024;
+    _audio_format = pyaudio.paInt32;
+    _channels = 1;
+    _rate = 20000;
+    def __init__(self, chunk_size, audio_format, channels, rate):
+        super().__init__();
+        self._chunk_size = chunk_size;
+        self._audio_format = audio_format;
+        self._channels = channels;
+        self._rate = rate;
+        self.p = pyaudio.PyAudio();
+        self.playing_stream = self.p.open(format=audio_format, channels=channels, rate=rate, output=True, frames_per_buffer=chunk_size);
+        self.recording_stream = self.p.open(format=audio_format, channels=channels, rate=rate, input=True, frames_per_buffer=chunk_size);
+
+    def receive_server_data(self, socket):
+        while True:
+            try:
+                username_length = int(username_header.decode('utf-8').strip());
+                rusername = client_socket.recv(username_length).decode('utf-8');
+                message_header = client_socket.recv(HEADER_LENGTH);
+                message_length = int(message_header.decode('utf-8').strip());
+                message = client_socket.recv(message_length);
+                decrypted_message = AESDecrypt(key_256, message);
+                self.playing_stream.write(decrypted_message);
+            except:
+                pass;
+        
+    def send_data_to_server(self, socket, key):
+        while True:
+            try:
+                data = self.recording_stream.read(self._chunk_size);
+                send(socket, AESEncrypt(key, data), "byte");
+            except Exception as e:
+                pass;
+
+def UploadFile(socket, address, key, buffer=2048):
+    """address = address.encode('utf-8');
+    address_enc = AESEncrypt(key, address);
+    address_header = f"{len(address_enc):<{HEADER_LENGTH}}".encode('utf-8');
+    socket.send(address_header + address_enc);"""
+    f = open(address, 'rb');
+    l = f.read(buffer);
+    while (l):
+        data = AESEncrypt(key, l);
+        data_header = f"{len(data):<{HEADER_LENGTH}}".encode('utf-8');
+        client_socket.send(data_header + data);
+        l = f.read(buffer);
+    f.close();
+
+def DownloadFile(socket, name, key, buffer=2048):
+    f = open(name, 'wb');
+    user_data = receive_message(socket);
+    l = receive_message(socket)["data"];
+    l = AESDecrypt(key_256, l);
+    while(l):
+        if (l != "SFTP END".encode('utf-8')):
+            f.write(l);
+            user_data = receive_message(socket);
+            l = receive_message(socket)["data"];
+            l = AESDecrypt(key, l);
+        else:
+            print(colored("SFTP END", "green"));
+            break;
+    f.close();
 
 def AESEncrypt(key, plaintext):
     IV = os.urandom(16);
@@ -58,8 +126,8 @@ def recieveEncryptedMessage(client_socket):
     except Exception as e:
         return False;
 
-def prompt():
-    sys.stdout.write("<You> ");
+def prompt(specialmessage=""):
+    sys.stdout.write("<You> %s" %specialmessage);
     sys.stdout.flush();
 
 HEADER_LENGTH = 10;
@@ -193,6 +261,18 @@ while(True):
                 message_length = int(message_header.decode('utf-8').strip());
                 message = client_socket.recv(message_length);
                 decrypted_message = AESDecrypt(key_256, message);
+                if decrypted_message[:13] == "SFTP Initiate".encode('utf-8'):
+                    print("Incoming File....");
+                    prompt("Enter File Name: ");
+                    name = sys.stdin.readline().strip();
+                    if (name == "x0default0x"):
+                        DownloadFile(socks, decrypted_message[13:].strip(), key_256, 2048);
+                    else:
+                        DownloadFile(socks, name, key_256, 2048);
+                    #address_data = receive_message(socket)["data"];
+                    #address_data = AESDecrypt(key_256, address_data).decode('utf-8');
+                    prompt();
+                    continue;
                 print(f"{rusername} > {decrypted_message.decode('utf-8')}");
                 prompt();
             except IOError as e:
@@ -206,8 +286,26 @@ while(True):
         else:
             message = sys.stdin.readline();
             if message:
-                message = message.encode('utf-8');
-                message = AESEncrypt(key_256, message);
-                message_header = f"{len(message):<{HEADER_LENGTH}}".encode('utf-8');
-                client_socket.send(message_header + message);
-                prompt();
+                if message == "?:0x0VoIPtestcmd\n":
+                    message = message.encode('utf-8');
+                    message = AESEncrypt(key_256, message);
+                    message_header = f"{len(message):<{HEADER_LENGTH}}".encode('utf-8');
+                    client_socket.send(message_header + message);
+                    voip_handle = VoIP(512, pyaudio.paInt32, 1, 44100);
+                    voip_receive_thread = threading.Thread(target=voip_handle.receive_server_data, args=(socks, )).start();
+                    voip_handle_thread = threading.Thread(target=voip_handle.send_data_to_server, args=(socks, key_256, )).start();
+                elif message[:15] == "?:0x0FTPtestcmd":
+                    ftp_flag = ("SFTP Initiate" + message[16:]).encode('utf-8');
+                    send(client_socket, AESEncrypt(key_256, ftp_flag), "byte");
+                    #prompt("Enter File Path: ");
+                    #address = sys.stdin.readline().strip();
+                    address = message[16:];
+                    UploadFile(client_socket, address.strip(), key_256, 2048);
+                    send(client_socket, AESEncrypt(key_256, "SFTP END".encode('utf-8')), "byte");
+                    prompt();    
+                else:
+                    message = message.encode('utf-8');
+                    message = AESEncrypt(key_256, message);
+                    message_header = f"{len(message):<{HEADER_LENGTH}}".encode('utf-8');
+                    client_socket.send(message_header + message);
+                    prompt();
