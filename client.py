@@ -6,6 +6,8 @@ import sys;
 import os;
 import pyaudio;
 import threading;
+import time;
+import re;
 from Crypto import Random;
 from Crypto.PublicKey import RSA;
 from Crypto.Util import Counter;
@@ -27,16 +29,12 @@ class VoIP:
         self.playing_stream = self.p.open(format=audio_format, channels=channels, rate=rate, output=True, frames_per_buffer=chunk_size);
         self.recording_stream = self.p.open(format=audio_format, channels=channels, rate=rate, input=True, frames_per_buffer=chunk_size);
 
-    def receive_server_data(self, socket):
+    def receive_server_data(self, socket, key):
         while True:
             try:
-                username_length = int(username_header.decode('utf-8').strip());
-                rusername = client_socket.recv(username_length).decode('utf-8');
-                message_header = client_socket.recv(HEADER_LENGTH);
-                message_length = int(message_header.decode('utf-8').strip());
-                message = client_socket.recv(message_length);
-                decrypted_message = AESDecrypt(key_256, message);
-                self.playing_stream.write(decrypted_message);
+                user_data = receive_message(socket);
+                message_stream = recieveEncryptedMessage(socket, key)["data"];
+                self.playing_stream.write(message_stream);
             except:
                 pass;
         
@@ -44,35 +42,27 @@ class VoIP:
         while True:
             try:
                 data = self.recording_stream.read(self._chunk_size);
-                send(socket, AESEncrypt(key, data), "byte");
+                sendEncryptedMessage(socket, data, key);
             except Exception as e:
                 pass;
 
 def UploadFile(socket, address, key, buffer=2048):
-    """address = address.encode('utf-8');
-    address_enc = AESEncrypt(key, address);
-    address_header = f"{len(address_enc):<{HEADER_LENGTH}}".encode('utf-8');
-    socket.send(address_header + address_enc);"""
     f = open(address, 'rb');
     l = f.read(buffer);
     while (l):
-        data = AESEncrypt(key, l);
-        data_header = f"{len(data):<{HEADER_LENGTH}}".encode('utf-8');
-        client_socket.send(data_header + data);
+        sendEncryptedMessage(socket, l, key);
         l = f.read(buffer);
     f.close();
 
 def DownloadFile(socket, name, key, buffer=2048):
     f = open(name, 'wb');
     user_data = receive_message(socket);
-    l = receive_message(socket)["data"];
-    l = AESDecrypt(key_256, l);
+    l = recieveEncryptedMessage(socket, key)["data"];
     while(l):
         if (l != "SFTP END".encode('utf-8')):
             f.write(l);
             user_data = receive_message(socket);
-            l = receive_message(socket)["data"];
-            l = AESDecrypt(key, l);
+            l = recieveEncryptedMessage(socket, key)["data"];
         else:
             print(colored("SFTP END", "green"));
             break;
@@ -90,7 +80,7 @@ def AESDecrypt(key, ciphertext):
     aes = AES.new(key, AES.MODE_CTR, counter=ctr);
     return aes.decrypt(ciphertext[16:]);
 
-def send(client_socket, message, type="string"):
+def send_message(client_socket, message, type="byte"):
     if type == "byte":
         message_header = f"{len(message):<{HEADER_LENGTH}}".encode('utf-8');
         client_socket.send(message_header + message);
@@ -99,11 +89,10 @@ def send(client_socket, message, type="string"):
         message_sender_header = f"{len(message_sender):<{HEADER_LENGTH}}".encode('utf-8');
         client_socket.send(message_sender_header + message_sender);
 
-def sendEncrypted(client_socket, message, AESKey):
-    message_encrypted = AESKey.encrypt(message);
-    message_sender = message_encrypted.encode('utf-8');
-    message_sender_header = f"{len(message_sender):<{HEADER_LENGTH}}".encode('utf-8');
-    client_socket.send(message_sender_header + message_sender);
+def sendEncryptedMessage(client_socket, message, AESKey):
+    message_encrypted = AESEncrypt(AESKey, message);
+    message_sender_header = f"{len(message_encrypted):<{HEADER_LENGTH}}".encode('utf-8');
+    client_socket.send(message_sender_header + message_encrypted);
 
 def receive_message(client_socket):
     try:
@@ -116,14 +105,32 @@ def receive_message(client_socket):
     except:
         return False;
 
-def recieveEncryptedMessage(client_socket):
+def recieveEncryptedMessage(client_socket, AESKey):
     try:
         message_header = client_socket.recv(HEADER_LENGTH);
         if not len(message_header):
             return False;
         message_length = int(message_header.decode('utf-8').strip());
-        return {'header': message_header, 'data': AESKey.decrypt(client_socket.recv(username_length).decode('utf-8'))};
+        encrypted_message = client_socket.recv(message_length);
+        decrypted_message = AESDecrypt(AESKey, encrypted_message);
+        return {'header': message_header, 'data': decrypted_message};
     except Exception as e:
+        return False;
+
+def checkIP(ip):
+    regex = '''^(25[0-5]|2[0-4][0-9]|[0-1]?[0-9][0-9]?)\.( 
+            25[0-5]|2[0-4][0-9]|[0-1]?[0-9][0-9]?)\.( 
+            25[0-5]|2[0-4][0-9]|[0-1]?[0-9][0-9]?)\.( 
+            25[0-5]|2[0-4][0-9]|[0-1]?[0-9][0-9]?)''';
+    if (re.search(regex, ip)):
+        return True;
+    else:
+        return False;
+
+def checkPort(port):
+    if (port >= 1 and port <= 65535):
+        return True;
+    else:
         return False;
 
 def prompt(specialmessage=""):
@@ -136,12 +143,12 @@ FLAG_QUIT = "Quit";
 
 hasher = hashlib.sha512();
 
+key_256 = b'';
 random_generator = Random.new();
 RSAKey = RSA.generate(4096, random_generator.read);
 public = RSAKey.publickey().exportKey();
 private = RSAKey.exportKey();
 public_hash = hashlib.sha512(public);
-#public_hash = hasher.update(public);
 public_hash_hexdigest = public_hash.hexdigest();
 
 print("Your Public Key: %s" %public);
@@ -149,7 +156,11 @@ print("Your Private Key: %s" %private);
 print("Your Public SHA512 Hash: %s" %public_hash_hexdigest);
 
 IP = str(input("Enter Server IP Address: "));
+while(checkIP(IP) == False):
+    IP = str(input("Enter Server IP Address: "));
 Port = int(input("Enter Socket Port: "));
+while(checkPort(Port) == False):
+    Port = int(input("Enter Socket Port: "));
 user_username = str(input("Username: "));
 
 try:
@@ -162,25 +173,8 @@ except BaseException:
     print(colored("Error Occured During Connection Phase!", "red"));
     exit(1);
 
-send(client_socket, public + ":".encode('utf-8') + public_hash_hexdigest.encode('utf-8'), "byte");
+send_message(client_socket, public + ":".encode('utf-8') + public_hash_hexdigest.encode('utf-8'), "byte");
 
-'''while(True):
-    try:
-        fGet_header = client_socket.recv(HEADER_LENGTH);
-        break;
-    except Exception:
-        pass
-
-
-#fGet_header = client_socket.recv(HEADER_LENGTH);
-fGet_length = int(fGet_header.decode('utf-8').strip());
-try:
-    fGet = client_socket.recv(fGet_length);
-except Exception as e:
-    print(colored("Error Occurred During Initial Handshake Sequence!", "red"));
-    print(e);
-    exit(1);
-'''
 while(True):
     fGet = receive_message(client_socket);
     if fGet == False:
@@ -191,10 +185,8 @@ split = fGet["data"].split("(:0x0:)".encode('utf-8'));
 toDecrypt = ''.encode('utf-8');
 for i in range(0, len(split) - 1):
     toDecrypt += split[i];
-#toDecrypt = split[0];
 serverPublic = split[len(split) - 1];
 print("Server's Public Key: %s" %serverPublic);
-#decrypted = RSA.importKey(private).decrypt(eval(toDecrypt.replace("\r\n", '')));
 decrypted = RSA.importKey(private).decrypt(toDecrypt);
 splittedDecrypt = decrypted.split(":0x0:".encode('utf-8'));
 ttwoByte = splittedDecrypt[0];
@@ -202,22 +194,17 @@ session_hexdigest = splittedDecrypt[1];
 serverPublicHash = splittedDecrypt[2];
 print("Client's AES Key In Hash: %s" %session_hexdigest);
 sess = hashlib.sha512(ttwoByte);
-#sess = hasher.update(ttwoByte);
 sess_hexdigest = sess.hexdigest();
 hashObj = hashlib.sha512(serverPublic);
-#hashObj = hasher.update(serverPublic);
 server_public_hash = hashObj.hexdigest();
 print(colored("Matching Server's Public Key & AES Key...", "yellow"));
 if server_public_hash == serverPublicHash.decode('utf-8') and sess_hexdigest == session_hexdigest.decode('utf-8'):
     print(colored("Sending Encrypted Session Key...", "blue"));
     (serverPublic, ) = RSA.importKey(serverPublic).encrypt(ttwoByte, None);
-    send(client_socket, serverPublic, "byte");
+    send_message(client_socket, serverPublic, "byte");
     print(colored("Creating AES Key...", "blue"));
     key_256 = ttwoByte;
-    #AESKey = AES.new(key_256, AES.MODE_CTR, counter=lambda: counter);
-    #AESKey = AES.new(key_256, AES.MODE_CBC, IV=key_256);
     try:
-        #ready_header = client_socket.recv(HEADER_LENGTH);
         while(True):
             ready = receive_message(client_socket);
             if ready == False:
@@ -228,9 +215,6 @@ if server_public_hash == serverPublicHash.decode('utf-8') and sess_hexdigest == 
         print(colored("Error Occurred During Second Phase Of Handshake Sequence!", "red"));
         print(e);
         exit(1);
-    #ready_length = int(ready_header.decode('utf-8').strip());
-    #ready = client_socket.recv(ready_length);
-    #ready_msg = AESKey.decrypt(ready);
     ready_msg = AESDecrypt(key_256, ready["data"]);
     if ready_msg == FLAG_READY.encode('utf-8'):
         print(colored("Client Is Ready To Communicate!", "green"));
@@ -239,9 +223,7 @@ if server_public_hash == serverPublicHash.decode('utf-8') and sess_hexdigest == 
         client_socket.close();
         exit(1);
 
-username = user_username.encode('utf-8');
-username_header = f"{len(username):<{HEADER_LENGTH}}".encode('utf-8');
-client_socket.send(username_header + username);
+sendEncryptedMessage(client_socket, user_username.encode('utf-8'), key_256);
 
 prompt();
 
@@ -251,16 +233,12 @@ while(True):
     for socks in read_sockets:
         if socks == client_socket:
             try:
-                username_header = client_socket.recv(HEADER_LENGTH);
-                if not len(username_header):
+                user_data = receive_message(client_socket);
+                if user_data == False:
                     print("Connection Closed By The Server");
                     sys.exit();
-                username_length = int(username_header.decode('utf-8').strip());
-                rusername = client_socket.recv(username_length).decode('utf-8');
-                message_header = client_socket.recv(HEADER_LENGTH);
-                message_length = int(message_header.decode('utf-8').strip());
-                message = client_socket.recv(message_length);
-                decrypted_message = AESDecrypt(key_256, message);
+                rusername = user_data["data"];
+                decrypted_message = recieveEncryptedMessage(client_socket, key_256)["data"];
                 if decrypted_message[:13] == "SFTP Initiate".encode('utf-8'):
                     print("Incoming File....");
                     prompt("Enter File Name: ");
@@ -269,11 +247,26 @@ while(True):
                         DownloadFile(socks, decrypted_message[13:].strip(), key_256, 2048);
                     else:
                         DownloadFile(socks, name, key_256, 2048);
-                    #address_data = receive_message(socket)["data"];
-                    #address_data = AESDecrypt(key_256, address_data).decode('utf-8');
                     prompt();
                     continue;
-                print(f"{rusername} > {decrypted_message.decode('utf-8')}");
+                if decrypted_message == "VoIP Initiate".encode('utf-8'):
+                    print("VoIP Request");
+                    prompt("Accept?(Y,N) ");
+                    if (sys.stdin.readline().strip() == "Y"):
+                        acceptance = "VoIP Accept".encode('utf-8');
+                        sendEncryptedMessage(client_socket, acceptance, key_256);
+                        voip_handle = VoIP(512, pyaudio.pa.paInt32, 1, 44100);
+                        voip_receive_thread = threading.Thread(target=voip_handle.receive_server_data, args=(socks, )).start();
+                        voip_handle_thread = threading.Thread(target=voip_handle.send_data_to_server, args=(socks, key_256)).start();
+                    elif (sys.stdin.readline().strip() == "N"):
+                        rejection = "VoIP Reject".encode('utf-8');
+                        sendEncryptedMessage(client_socket, rejection, key_256);
+                        prompt();
+                        continue;
+                    else:
+                        print(colored("Invalid Input. Quitting!", "red"));
+                        sys.exit(1);
+                print(f"{rusername.decode('utf-8')} > {decrypted_message.decode('utf-8')}");
                 prompt();
             except IOError as e:
                 if e.errno != errno.EAGAIN and e.errno != errno.EWOULDBLOCK:
@@ -287,30 +280,27 @@ while(True):
             message = sys.stdin.readline();
             if message:
                 if message == "?:0x0VoIPtestcmd\n":
-                    message = message.encode('utf-8');
-                    message = AESEncrypt(key_256, message);
-                    message_header = f"{len(message):<{HEADER_LENGTH}}".encode('utf-8');
-                    client_socket.send(message_header + message);
-                    voip_handle = VoIP(512, pyaudio.paInt32, 1, 44100);
-                    voip_receive_thread = threading.Thread(target=voip_handle.receive_server_data, args=(socks, )).start();
-                    voip_handle_thread = threading.Thread(target=voip_handle.send_data_to_server, args=(socks, key_256, )).start();
+                    message = "VoIP Initiate".encode('utf-8');
+                    sendEncryptedMessage(client_socket, message, key_256);
+                    time.sleep(5);
+                    user_data = receive_message(client_socket);
+                    confirmation = recieveEncryptedMessage(client_socket, key_256)["data"];
+                    if confirmation == "VoIP Reject".encode('utf-8'):
+                        print(colored("VoIP Rejected By End User!", "orange"));
+                        prompt();
+                        continue;
+                    elif confirmation == "VoIP Accept".encode('utf-8'):
+                        voip_handle = VoIP(512, pyaudio.paInt32, 1, 44100);
+                        voip_receive_thread = threading.Thread(target=voip_handle.receive_server_data, args=(socks, )).start();
+                        voip_handle_thread = threading.Thread(target=voip_handle.send_data_to_server, args=(socks, key_256, )).start();
                 elif message[:15] == "?:0x0FTPtestcmd":
                     ftp_flag = ("SFTP Initiate" + message[16:]).encode('utf-8');
-                    send(client_socket, AESEncrypt(key_256, ftp_flag), "byte");
-                    #prompt("Enter File Path: ");
-                    #address = sys.stdin.readline().strip();
+                    sendEncryptedMessage(client_socket, ftp_flag, key_256);
                     address = message[16:];
                     UploadFile(client_socket, address.strip(), key_256, 2048);
-                    send(client_socket, AESEncrypt(key_256, "SFTP END".encode('utf-8')), "byte");
-                    prompt();    
+                    sendEncryptedMessage(client_socket, "SFTP END".encode('utf-8'), key_256);
+                    prompt();
                 else:
                     message = message.encode('utf-8');
-                    message = AESEncrypt(key_256, message);
-                    message_header = f"{len(message):<{HEADER_LENGTH}}".encode('utf-8');
-                    client_socket.send(message_header + message);
-                   prompt();
-                message = message.encode('utf-8');
-                message = AESEncrypt(key_256, message);
-                message_header = f"{len(message):<{HEADER_LENGTH}}".encode('utf-8');
-                client_socket.send(message_header + message);
-                prompt();
+                    sendEncryptedMessage(client_socket, message, key_256);
+                    prompt();

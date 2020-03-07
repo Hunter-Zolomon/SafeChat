@@ -8,6 +8,8 @@ This program was created in order to demonstrate simple cryptography and socket 
 
   - PyCrypto (Download Link: https://pypi.org/project/pycrypto/)
   - Termcolor (Download Link: https://pypi.org/project/termcolor/)
+  - PyAudio (Download Link: https://pypi.org/project/PyAudio/)
+  
 # Usage
 Run the server module on the appropriate machine:
     `python3 server.py`
@@ -20,9 +22,9 @@ You will be asked to enter the IP address of the interface, a static Port and a 
 # Future Plans
 1. Increased security through improved encryption protocol (Forward Secrecy, EC).
 2. Dynamic send/receive collision aversion.
-3. Data Integrity (Hash Check).
-4. File sending capabilities.
-5. Integration of HMAC.
-6. VoIP, VideoChat
+3. Data Integrity (Hash Check/HMAC).
+4. File sending capabilities(Currently in Alpha).
+5. VoIP(Currently in Alpha)
+6. VideoChat
 
 Note: Thanks to mjm918 for parts of the handshake protocol outline.
