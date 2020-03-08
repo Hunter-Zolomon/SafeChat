@@ -1,13 +1,14 @@
 from Crypto.PublicKey import RSA
+from Crypto import Random;
+from Crypto.Cipher import AES;
+from Crypto.Cipher import PKCS1_OAEP;
+from Crypto.Util import Counter;
+from termcolor import colored;
 import socket;
 import select;
 import os;
 import hashlib;
 import re;
-from Crypto import Random;
-from Crypto.Cipher import AES;
-from Crypto.Util import Counter;
-from termcolor import colored;
 
 def AESEncrypt(key, plaintext):
     IV = os.urandom(16);
@@ -158,6 +159,7 @@ while(True):
             if tmphash == clientPublicHash:
                 print(colored("Client's Public Key and Public Key Hash Matched!", "blue"));
                 clientPublic = RSA.importKey(tmpClientPublic);
+                pkclient = PKCS1_OAEP.new(clientPublic);
                 ttwoByte = os.urandom(32);
                 print("Client Server Map TTWoByte: %s" %ttwoByte);
                 session = hashlib.sha512(ttwoByte);
@@ -166,7 +168,8 @@ while(True):
                 fSend = ttwoByte + ":0x0:".encode('utf-8') + session_hexdigest.encode('utf-8') + ":0x0:".encode('utf-8') + public_hash_hexdigest.encode('utf-8');
                 print(fSend);
                 print(" ");
-                (fSend, ) = clientPublic.encrypt(fSend, None);
+                #(fSend, ) = clientPublic.encrypt(fSend, None);
+                fSend = pkclient.encrypt(fSend);
                 temp = fSend + "(:0x0:)".encode('utf-8') + public;
                 print(temp);
                 try:

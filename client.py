@@ -1,4 +1,9 @@
-from Crypto.Cipher import AES
+from Crypto.Cipher import AES;
+from Crypto.Cipher import PKCS1_OAEP;
+from Crypto.PublicKey import RSA;
+from Crypto.Util import Counter;
+from Crypto import Random;
+from termcolor import colored;
 import socket;
 import select;
 import errno;
@@ -8,11 +13,8 @@ import pyaudio;
 import threading;
 import time;
 import re;
-from Crypto import Random;
-from Crypto.PublicKey import RSA;
-from Crypto.Util import Counter;
 import hashlib;
-from termcolor import colored;
+
 
 class VoIP:
     _chunk_size = 1024;
@@ -187,7 +189,9 @@ for i in range(0, len(split) - 1):
     toDecrypt += split[i];
 serverPublic = split[len(split) - 1];
 print("Server's Public Key: %s" %serverPublic);
-decrypted = RSA.importKey(private).decrypt(toDecrypt);
+#decrypted = RSA.importKey(private).decrypt(toDecrypt);
+intermediate = RSA.importKey(private);
+decrypted = PKCS1_OAEP.new(intermediate).decrypt(toDecrypt);
 splittedDecrypt = decrypted.split(":0x0:".encode('utf-8'));
 ttwoByte = splittedDecrypt[0];
 session_hexdigest = splittedDecrypt[1];
