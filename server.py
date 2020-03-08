@@ -187,7 +187,9 @@ while(True):
                         break;
                 
                 if clientPH["data"] != "".encode('utf-8'):
-                    clientPH_other = RSA.importKey(private).decrypt(clientPH["data"]);
+                    #clientPH_other = RSA.importKey(private).decrypt(clientPH["data"]);
+                    intermediate = RSA.importKey(private);
+                    clientPH_other = PKCS1_OAEP.new(intermediate).decrypt(clientPH["data"]);
                     print(colored("Matching Session Key...", "blue"));
                     if clientPH_other == ttwoByte:
                         print(colored("Creating AES Key...", "blue"));

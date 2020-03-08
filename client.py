@@ -204,7 +204,9 @@ server_public_hash = hashObj.hexdigest();
 print(colored("Matching Server's Public Key & AES Key...", "yellow"));
 if server_public_hash == serverPublicHash.decode('utf-8') and sess_hexdigest == session_hexdigest.decode('utf-8'):
     print(colored("Sending Encrypted Session Key...", "blue"));
-    (serverPublic, ) = RSA.importKey(serverPublic).encrypt(ttwoByte, None);
+    #(serverPublic, ) = RSA.importKey(serverPublic).encrypt(ttwoByte, None);
+    intermediate = RSA.importKey(serverPublic);
+    serverPublic = PKCS1_OAEP.new(intermediate).encrypt(ttwoByte);
     send_message(client_socket, serverPublic, "byte");
     print(colored("Creating AES Key...", "blue"));
     key_256 = ttwoByte;
