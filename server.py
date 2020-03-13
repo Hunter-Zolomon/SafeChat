@@ -141,7 +141,7 @@ print(colored("Server Connection Successfully Setup!", "green"));
 print(colored(f"Listening for connections on {IP}:{Port}...", "magenta"));
 
 while(True):
-    read_sockets, write_sockets, exception_sockets = select.select(socket_list, [], socket_list, 0);
+    read_sockets, write_sockets, exception_sockets = select.select(socket_list, [], socket_list);
     for socket in read_sockets:
         if socket == server_socket:
             client_socket, client_address = server_socket.accept();
@@ -222,7 +222,7 @@ while(True):
                 del client_dic[socket];
                 continue;
             decrypted_message = decrypted_message["data"];
-            print(f'Received message from {user["data"].decode("utf-8")}: {decrypted_message.decode("utf-8")}'); #removed ["data"] for user
+            print(f'Received message from {user["data"].decode("utf-8")}: {decrypted_message}'); #removed ["data"] for user
             broadcast(socket, user["data"], decrypted_message, "byte");
     for socket in exception_sockets:
         socket_list.remove(socket);
