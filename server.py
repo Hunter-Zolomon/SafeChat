@@ -1,7 +1,7 @@
+from Crypto.Hash import HMAC, SHA512;
 from Crypto.PublicKey import RSA
 from Crypto import Random;
-from Crypto.Cipher import AES;
-from Crypto.Cipher import PKCS1_OAEP;
+from Crypto.Cipher import AES, PKCS1_OAEP;
 from Crypto.Util import Counter;
 from termcolor import colored;
 import socket;
@@ -9,6 +9,18 @@ import select;
 import os;
 import hashlib;
 import re;
+
+CUSTOM_SEPARATOR = b':0x0:';
+
+def HMACher(data, key, check_mode_var=""):
+    hmac = HMAC.new(key, data, SHA512);
+    if check_mode_var == "":
+        return hmac.hexdigest();
+    elif check_mode_var:
+        if hmac.hexdigest() == check_mode_var:
+            return True;
+        else:
+            return False;
 
 def AESEncrypt(key, plaintext):
     IV = os.urandom(16);
@@ -32,9 +44,11 @@ def send_message(client_socket, message, type="byte"):
         client_socket.send(message_sender_header + message_sender);
 
 def sendEncryptedMessage(client_socket, message, AESKey):
-    message_encrypted = AESEncrypt(AESKey, message);
-    message_sender_header = f"{len(message_encrypted):<{HEADER_LENGTH}}".encode('utf-8');
-    client_socket.send(message_sender_header + message_encrypted);
+    hashed_message = HMACher(message, AESKey);
+    message_encrypted = AESEncrypt(AESKey, message + CUSTOM_SEPARATOR + hashed_message);
+    send_message(client_socket, message_encrypted, type="byte");
+    #message_sender_header = f"{len(message_encrypted):<{HEADER_LENGTH}}".encode('utf-8');
+    #client_socket.send(message_sender_header + message_encrypted);
 
 def receive_message(client_socket):
     try:
@@ -47,15 +61,20 @@ def receive_message(client_socket):
     except:
         return False;
 
-def recieveEncryptedMessage(client_socket, AESKey):
+def recieveEncryptedMessage(client_socket, AESKey, passthrough=False):
     try:
-        message_header = client_socket.recv(HEADER_LENGTH);
-        if not len(message_header):
-            return False;
-        message_length = int(message_header.decode('utf-8').strip());
-        encrypted_message = client_socket.recv(message_length);
-        decrypted_message = AESDecrypt(AESKey, encrypted_message);
-        return {'header': message_header, 'data': decrypted_message};
+        whole_message = receive_message(client_socket);
+        decrypted_message = AESDecrypt(AESKey, whole_message["data"]);
+        split_decrypted_message = decrypted_message.split(CUSTOM_SEPARATOR);
+        plain_message = CUSTOM_SEPARATOR.join(split_decrypted_message[:-1]);
+        mac = split_decrypted_message[len(split_decrypted_message) - 1];
+        if passthrough:
+            return {'header': whole_message["header"], 'data': plain_message, 'integrity': True};
+        #if mac == Hasher(decrypted_message[:len(decrypted_message)-69], key_256):
+        if HMACher(plain_message, AESKey, mac.decode('utf-8')):
+            return {'header': whole_message["header"], 'data': plain_message, 'integrity': True};
+        else:
+            return {'header': whole_message["header"], 'data': plain_message, 'integrity': False};
     except Exception as e:
         return False;
 
@@ -65,19 +84,13 @@ def broadcast(client_socket, user, message, type="byte"):
             try:
                 username_header = f"{len(user):<{HEADER_LENGTH}}".encode('utf-8');
                 user_socket_key = aes_client_mapping[socket];
-                enc_message = AESEncrypt(user_socket_key, message);
+                message_hash = HMACher(message, user_socket_key);
+                enc_message = AESEncrypt(user_socket_key, message + CUSTOM_SEPARATOR + message_hash.encode('utf-8'));
                 enc_message_header = f"{len(enc_message):<{HEADER_LENGTH}}".encode('utf-8');
                 socket.send(username_header + user + enc_message_header + enc_message);
             except:
                 socket.close();
                 socket_list.remove(socket);
-
-def RemovePadding(s):
-    return s.replace('`','');
-
-
-def Padding(s):
-    return s + ((16 - len(s) % 16) * '`');
 
 def checkIP(ip):
     regex = '''^(25[0-5]|2[0-4][0-9]|[0-1]?[0-9][0-9]?)\.( 
@@ -96,10 +109,6 @@ def checkPort(port):
         return False;
 
 HEADER_LENGTH = 10;
-FLAG_READY = "Ready";
-FLAG_QUIT = "Quit";
-YES = "1";
-NO = "0";
 
 hasher = hashlib.sha512();
 
@@ -194,11 +203,12 @@ while(True):
                     if clientPH_other == ttwoByte:
                         print(colored("Creating AES Key...", "blue"));
                         key_256 = ttwoByte;
-                        client_msg = AESEncrypt(key_256, FLAG_READY.encode('utf-8'));
+                        client_msg = AESEncrypt(key_256, "Ready".encode('utf-8'));
                         send_message(client_socket, client_msg, "byte");
                         print(colored("Waiting For Client's Username...", "blue"));
                         user = recieveEncryptedMessage(client_socket, key_256);
                         if user is False:
+                            print(colored("Error While receiving username! Halting Handshake", "red"));
                             continue;
                         socket_list.append(client_socket);
                         client_dic[client_socket] = user;
@@ -221,9 +231,22 @@ while(True):
                 socket_list.remove(socket);
                 del client_dic[socket];
                 continue;
-            decrypted_message = decrypted_message["data"];
-            print(f'Received message from {user["data"].decode("utf-8")}: {decrypted_message}'); #removed ["data"] for user
-            broadcast(socket, user["data"], decrypted_message, "byte");
+            elif decrypted_message["data"][:13] == b'SFTP Initiate':
+                print(f'Received message from {user["data"].decode("utf-8")}: [{str(decrypted_message["integrity"])}] {decrypted_message["data"]}'); #removed ["data"] for user
+                broadcast(socket, user["data"], decrypted_message["data"], "byte");
+                decrypted_message = recieveEncryptedMessage(socket, user_key, True);
+                while not (decrypted_message["data"][:8] == 'SFTP END'.encode('utf-8')):
+                    broadcast(socket, user["data"], decrypted_message["data"], "byte");
+                    decrypted_message = recieveEncryptedMessage(socket, user_key, True);
+                print(f'Received message from {user["data"].decode("utf-8")}: [{str(decrypted_message["integrity"])}] {decrypted_message["data"]}'); #removed ["data"] for user
+                broadcast(socket, user["data"], decrypted_message["data"], "byte");
+                continue;
+            #decrypted_message = decrypted_message["data"];
+            print(f'Received message from {user["data"].decode("utf-8")}: [{str(decrypted_message["integrity"])}] {decrypted_message["data"]}'); #removed ["data"] for user
+            if decrypted_message["integrity"]:
+                broadcast(socket, user["data"], decrypted_message["data"], "byte");
+            else:
+                continue;
     for socket in exception_sockets:
         socket_list.remove(socket);
         del client_dic[socket];

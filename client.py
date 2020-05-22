@@ -1,7 +1,7 @@
-from Crypto.Cipher import AES;
-from Crypto.Cipher import PKCS1_OAEP;
+from Crypto.Cipher import AES, PKCS1_OAEP;
 from Crypto.PublicKey import RSA;
 from Crypto.Util import Counter;
+from Crypto.Hash import HMAC, SHA512;
 from Crypto import Random;
 from termcolor import colored;
 import tqdm;
@@ -17,40 +17,9 @@ import time;
 import re;
 import hashlib;
 
-"""
-class VoIP:
-    _chunk_size = 1024;
-    _audio_format = pyaudio.paInt32;
-    _channels = 1;
-    _rate = 20000;
-    def __init__(self, chunk_size, audio_format, channels, rate):
-        super().__init__();
-        self._chunk_size = chunk_size;
-        self._audio_format = audio_format;
-        self._channels = channels;
-        self._rate = rate;
-        self.p = pyaudio.PyAudio();
-        self.playing_stream = self.p.open(format=audio_format, channels=channels, rate=rate, output=True, frames_per_buffer=chunk_size);
-        self.recording_stream = self.p.open(format=audio_format, channels=channels, rate=rate, input=True, frames_per_buffer=chunk_size);
+CUSTOM_SEPARATOR = b':0x0:';
 
-    def receive_server_data(self, socket, key):
-        while True:
-            try:
-                user_data = receive_message(socket);
-                message_stream = recieveEncryptedMessage(socket, key)["data"];
-                self.playing_stream.write(message_stream);
-            except:
-                pass;
-        
-    def send_data_to_server(self, socket, key):
-        while True:
-            try:
-                data = self.recording_stream.read(self._chunk_size);
-                sendEncryptedMessage(socket, data, key);
-            except Exception as e:
-                pass;
-"""
-def VoIPInitialize(chunk_size, audio_format, channels, rate):
+def VoIPInitialize(chunk_size=1024, audio_format=pyaudio.paInt32, channels=1, rate=20000):
     p = pyaudio.PyAudio();
     playing_stream = p.open(format=audio_format, channels=channels, rate=rate, output=True, frames_per_buffer=chunk_size);
     recording_stream = p.open(format=audio_format, channels=channels, rate=rate, input=True, frames_per_buffer=chunk_size);
@@ -90,45 +59,33 @@ def FileDecompressor(tar_file, file_name):
         progress.set_description(f"Extracting {file.name}")
     tar.close()
 
-def UploadFile(socket, address, key, filesize, buffer=2048):
-    FileCompressor("temp.tar.gz", [address]);
+def UploadFile(socket, address, key, size_uncompressed, size_compressed, buffer=2048):
     #f = open(address, 'rb');
     f = open("temp.tar.gz", "rb");
-    file_hash = hashlib.sha512();
-    progress = tqdm.tqdm(range(filesize), f"Sending {address}", unit="B", unit_scale=True, unit_divisor=1024);
-    """l = f.read(buffer);
-    while (l):
-        time.sleep(0.01);
-        sendEncryptedMessage(socket, l, key);
-        l = f.read(buffer);
-    f.close();"""
+    file_hash_uc = hashlib.sha512();
+    file_hash_c = hashlib.sha512();
+    progress = tqdm.tqdm(range(size_compressed),f"Sending {address}", unit="B", unit_scale=True, unit_divisor=1024);
+    with open(address, "rb") as filehandle:
+        while True:
+            block = filehandle.read(buffer);
+            if not block:
+                break;
+            file_hash_uc.update(block);
     for _ in progress:
         l = f.read(buffer);
         if not l:
             break;
         sendEncryptedMessage(socket, l, key);
         progress.update(len(l));
-        file_hash.update(l);
+        file_hash_c.update(l);
     f.close();
-    return file_hash;
+    return (file_hash_uc, file_hash_c);
 
-def DownloadFile(socket, name, key, filesize, buffer=2048):
+def DownloadFile(socket, name, key, size_uncompressed, size_compressed, buffer=2048):
     #f = open(name, 'wb');
     f = open("temp.tar.gz", "wb");
     file_hash = hashlib.sha512();
-    progress = tqdm.tqdm(range(filesize), f"Receiving {name}", unit="B", unit_scale=True, unit_divisor=1024);
-    """user_data = receive_message(socket);
-    l = recieveEncryptedMessage(socket, key)["data"];
-    while(l):
-        if (l != "SFTP END".encode('utf-8')):
-            f.write(l);
-            time.sleep(0.02);
-            user_data = receive_message(socket);
-            l = recieveEncryptedMessage(socket, key)["data"];
-        else:
-            print(colored("SFTP END", "green"));
-            break;
-    f.close();"""
+    progress = tqdm.tqdm(range(size_compressed), f"Receiving {name}", unit="B", unit_scale=True, unit_divisor=1024);
     for _ in progress:
         user_data = receive_message(socket);
         l = recieveEncryptedMessage(socket, key)["data"];
@@ -138,15 +95,36 @@ def DownloadFile(socket, name, key, filesize, buffer=2048):
             file_hash.update(l);
         else:
             print(colored("SFTP END", "blue"));
-            received_file_hash = l[13:].decode('utf-8');
-            if received_file_hash == file_hash.hexdigest():
+            f.close();
+            split_data = l.split(":0x0:");
+            received_file_hash_uc = split_data[1].decode('utf-8');
+            received_file_hash_c = split_data[2].decode('utf-8');
+            if received_file_hash_c == file_hash.hexdigest():
+                FileDecompressor("temp.tar.gz", [name]);
+                with open(name, "rb") as filehandle:
+                    ucfilehash = hashlib.sha512();
+                    while True:
+                        block = filehandle.read(buffer);
+                        if not block:
+                            break;
+                        ucfilehash.update(block);
+            filehandle.close();
+            if received_file_hash_c == file_hash.hexdigest() and received_file_hash_uc == ucfilehash.hexdigest():
                 print(colored("SFTP Checksum Matched!", "green"));
                 break;
             else:
                 print(colored("SFTP Checksum Did Not Match! File Is Corrupt", "red"));
                 break;  
-    f.close();
-    FileDecompressor("temp.tar.gz", [name]);
+
+def HMACher(data, key, check_mode_var=""):
+    hmac = HMAC.new(key, data, SHA512);
+    if check_mode_var == "":
+        return hmac.hexdigest();
+    elif check_mode_var:
+        if hmac.hexdigest() == check_mode_var:
+            return True;
+        else:
+            return False;
 
 def AESEncrypt(key, plaintext):
     IV = os.urandom(16);
@@ -170,9 +148,11 @@ def send_message(client_socket, message, type="byte"):
         client_socket.send(message_sender_header + message_sender);
 
 def sendEncryptedMessage(client_socket, message, AESKey):
-    message_encrypted = AESEncrypt(AESKey, message);
-    message_sender_header = f"{len(message_encrypted):<{HEADER_LENGTH}}".encode('utf-8');
-    client_socket.send(message_sender_header + message_encrypted);
+    hashed_message = HMACher(message, AESKey); 
+    message_encrypted = AESEncrypt(AESKey, message + CUSTOM_SEPARATOR + hashed_message.encode('utf-8'));
+    send_message(client_socket, message_encrypted, type="byte");
+    #message_sender_header = f"{len(message_encrypted):<{HEADER_LENGTH}}".encode('utf-8');
+    #client_socket.send(message_sender_header + message_encrypted);
 
 def receive_message(client_socket):
     try:
@@ -187,13 +167,15 @@ def receive_message(client_socket):
 
 def recieveEncryptedMessage(client_socket, AESKey):
     try:
-        message_header = client_socket.recv(HEADER_LENGTH);
-        if not len(message_header):
-            return False;
-        message_length = int(message_header.decode('utf-8').strip());
-        encrypted_message = client_socket.recv(message_length);
-        decrypted_message = AESDecrypt(AESKey, encrypted_message);
-        return {'header': message_header, 'data': decrypted_message};
+        whole_message = receive_message(client_socket);
+        decrypted_message = AESDecrypt(AESKey, whole_message["data"]);
+        split_decrypted_message = decrypted_message.split(CUSTOM_SEPARATOR);
+        plain_message = CUSTOM_SEPARATOR.join(split_decrypted_message[:-1]);
+        mac = split_decrypted_message[len(split_decrypted_message) - 1];
+        if HMACher(plain_message, AESKey, mac.decode('utf-8')):
+            return {'header': whole_message["header"], 'data': plain_message, 'integrity': True};
+        else:
+            return {'header': whole_message["header"], 'data': plain_message, 'integrity': False};
     except Exception as e:
         return False;
 
@@ -218,10 +200,6 @@ def prompt(specialmessage=""):
     sys.stdout.flush();
 
 HEADER_LENGTH = 10;
-FLAG_READY = "Ready";
-FLAG_QUIT = "Quit";
-
-hasher = hashlib.sha512();
 
 key_256 = b'';
 random_generator = Random.new();
@@ -300,7 +278,7 @@ if server_public_hash == serverPublicHash.decode('utf-8') and sess_hexdigest == 
         print(e);
         exit(1);
     ready_msg = AESDecrypt(key_256, ready["data"]);
-    if ready_msg == FLAG_READY.encode('utf-8'):
+    if ready_msg == "Ready".encode('utf-8'):
         print(colored("Client Is Ready To Communicate!", "green"));
     else:
         print(colored("Server's Public || Session Key Doesn't Match. Shutting Down Socket!", "red"));
@@ -308,6 +286,7 @@ if server_public_hash == serverPublicHash.decode('utf-8') and sess_hexdigest == 
         exit(1);
 
 sendEncryptedMessage(client_socket, user_username.encode('utf-8'), key_256);
+print(HMACher(user_username.encode('utf-8'), key_256));
 
 prompt();
 
@@ -322,17 +301,20 @@ while(True):
                     print("Connection Closed By The Server");
                     sys.exit();
                 rusername = user_data["data"];
-                decrypted_message = recieveEncryptedMessage(client_socket, key_256)["data"];
+                decrypted_message_package = recieveEncryptedMessage(client_socket, key_256);
+                decrypted_message = decrypted_message_package["data"];
                 split_decrypted_message = decrypted_message.split(":0x0:".encode('utf-8'));
                 if split_decrypted_message[0] == "SFTP Initiate".encode('utf-8'):
                     print("Incoming File....");
                     prompt("Enter File Name: ");
                     name = sys.stdin.readline().strip();
+                    dfilename = split_decrypted_message[1].decode('utf-8').strip();
+                    filesize_uc = split_decrypted_message[2];
+                    filesize_c = split_decrypted_message[3];
                     if (name == "x0default0x"):
-                        #DownloadFile(socks, decrypted_message[13:].strip(), key_256, 2048);
-                        DownloadFile(socks, split_decrypted_message[1].decode('utf-8').strip(), key_256, split_decrypted_message[2], 2048);
+                        DownloadFile(socks, dfilename, key_256, int(filesize_uc), int(filesize_c), 16384);
                     else:
-                        DownloadFile(socks, name, key_256, int(split_decrypted_message[2].decode('utf-8')), 2048);
+                        DownloadFile(socks, name, key_256, int(filesize_uc), int(filesize_c),16384);
                     os.remove("temp.tar.gz");
                     prompt();
                     continue;
@@ -342,10 +324,7 @@ while(True):
                     if (sys.stdin.readline().strip() == "Y"):
                         acceptance = "VoIP Accept".encode('utf-8');
                         sendEncryptedMessage(client_socket, acceptance, key_256);
-                        #voip_handle = VoIP(512, pyaudio.pa.paInt32, 1, 44100);
                         (playing_stream, recording_stream) = VoIPInitialize(512, pyaudio.paInt32, 1, 44100);
-                        #voip_receive_thread = threading.Thread(target=voip_handle.receive_server_data, args=(socks, )).start();
-                        #voip_handle_thread = threading.Thread(target=voip_handle.send_data_to_server, args=(socks, key_256)).start();
                         voip_receive_thread = threading.Thread(target=receive_server_data, kwargs=dict(playing_stream=playing_stream, socket=socks, key=key_256)).start();
                         voip_handle_thread = threading.Thread(target=send_data_to_server, kwargs=dict(recording_stream=recording_stream, socket=socks, key=key_256, chunk_size=512)).start();
                     elif (sys.stdin.readline().strip() == "N"):
@@ -356,7 +335,10 @@ while(True):
                     else:
                         print(colored("Invalid Input. Quitting!", "red"));
                         sys.exit(1);
-                print(f"{rusername.decode('utf-8')} > {decrypted_message.decode('utf-8')}");
+                if decrypted_message_package["integrity"]:
+                    print(f"{rusername.decode('utf-8')} > [I] {decrypted_message.decode('utf-8')}");
+                else:
+                    print(f"{rusername.decode('utf-8')} > [C] {decrypted_message.decode('utf-8')}");
                 prompt();
             except IOError as e:
                 if e.errno != errno.EAGAIN and e.errno != errno.EWOULDBLOCK:
@@ -380,19 +362,18 @@ while(True):
                         prompt();
                         continue;
                     elif confirmation == "VoIP Accept".encode('utf-8'):
-                        #voip_handle = VoIP(512, pyaudio.paInt32, 1, 44100);
                         (playing_stream, recording_stream) = VoIPInitialize(512, pyaudio.paInt32, 1, 44100);
-                        #voip_receive_thread = threading.Thread(target=voip_handle.receive_server_data, kwargs=dict(socket=socks, key=key_256)).start();
-                        #voip_handle_thread = threading.Thread(target=voip_handle.send_data_to_server, kwargs=dict(socket=socks, key=key_256)).start();
                         voip_receive_thread = threading.Thread(target=receive_server_data, kwargs=dict(playing_stream=playing_stream, socket=socks, key=key_256)).start();
                         voip_handle_thread = threading.Thread(target=send_data_to_server, kwargs=dict(recording_stream=recording_stream, socket=socks, key=key_256, chunk_size=512)).start();
                 elif message[:15] == "?:0x0FTPtestcmd":
                     address = message[16:].strip();
-                    filesize = os.path.getsize(address);
-                    ftp_flag = ("SFTP Initiate" + ":0x0:" + address + ":0x0:" + str(filesize)).encode('utf-8');
+                    filesize_uc = os.path.getsize(address);
+                    FileCompressor("temp.tar.gz", [address]);
+                    filesize_c = os.path.getsize("temp.tar.gz");
+                    ftp_flag = ("SFTP Initiate" + ":0x0:" + address + ":0x0:" + str(filesize_uc) + ":0x0:" + str(filesize_c)).encode('utf-8');
                     sendEncryptedMessage(client_socket, ftp_flag, key_256);
-                    file_hash = UploadFile(client_socket, address, key_256, filesize, 2048);
-                    sendEncryptedMessage(client_socket, ("SFTP END" + ":0x0:" + file_hash.hexdigest()).encode('utf-8'), key_256);
+                    file_hash = UploadFile(client_socket, address, key_256, filesize_uc, filesize_c, 16384);
+                    sendEncryptedMessage(client_socket, ("SFTP END" + ":0x0:" + file_hash[0].hexdigest() + ":0x0:" + file_hash[1].hexdigest()).encode('utf-8'), key_256);
                     os.remove("temp.tar.gz");
                     print("");
                     prompt();
