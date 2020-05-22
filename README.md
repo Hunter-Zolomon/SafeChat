@@ -22,7 +22,7 @@ You will be asked to enter the IP address of the interface, a static Port and a 
 # Future Plans
 1. Increased security through improved encryption protocol (Forward Secrecy, EC).
 2. Dynamic send/receive collision aversion.
-3. Data Integrity (Hash Check/HMAC).
+3. Data Integrity (Hash Check/HMAC)(Currently in Alpha).
 4. File sending capabilities(Currently in Alpha).
 5. VoIP(Currently in Alpha)
 6. VideoChat
