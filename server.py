@@ -50,15 +50,28 @@ def sendEncryptedMessage(client_socket, message, AESKey):
     #message_sender_header = f"{len(message_encrypted):<{HEADER_LENGTH}}".encode('utf-8');
     #client_socket.send(message_sender_header + message_encrypted);
 
+def recv_exact(socket, size):
+    buflist = [];
+    while size:
+        buf = socket.recv(size);
+        if not buf:
+            return False;
+        buflist.append(buf);
+        size -= len(buf);
+    return b''.join(buflist);
+
 def receive_message(client_socket):
     try:
-        message_header = client_socket.recv(HEADER_LENGTH);
+        #message_header = client_socket.recv(HEADER_LENGTH);
+        message_header = recv_exact(client_socket, HEADER_LENGTH);
         if not len(message_header):
             return False;
         message_length = int(message_header.decode('utf-8').strip());
-        return {'header': message_header, 'data': client_socket.recv(message_length)};
+        #return {'header': message_header, 'data': client_socket.recv(message_length)};
+        return {'header': message_header, 'data': recv_exact(client_socket, message_length)};
         pass;
-    except:
+    except Exception as e:
+        print(e);
         return False;
 
 def recieveEncryptedMessage(client_socket, AESKey, passthrough=False):
@@ -76,6 +89,7 @@ def recieveEncryptedMessage(client_socket, AESKey, passthrough=False):
         else:
             return {'header': whole_message["header"], 'data': plain_message, 'integrity': False};
     except Exception as e:
+        print(e);
         return False;
 
 def broadcast(client_socket, user, message, type="byte"):
@@ -91,6 +105,17 @@ def broadcast(client_socket, user, message, type="byte"):
             except:
                 socket.close();
                 socket_list.remove(socket);
+
+def close_connection(socket, sock_list, client_dictionary):
+    user = client_dictionary[socket]["data"]
+    print("Closed connection from: {}".format(user.decode('utf-8')));
+    literal = f"[{user.decode('utf-8')}] Has Left The Chat";
+    literal = literal.encode('utf-8');
+    literal_header = f"{len(literal):<{HEADER_LENGTH}}".encode('utf-8');
+    broadcast(socket, user, literal, type="byte");
+    sock_list.remove(socket);
+    del client_dictionary[socket];
+    return (sock_list, client_dictionary);
 
 def checkIP(ip):
     regex = '''^(25[0-5]|2[0-4][0-9]|[0-1]?[0-9][0-9]?)\.( 
@@ -119,8 +144,10 @@ private = RSAkey.exportKey();
 public_hash = hashlib.sha512(public);
 public_hash_hexdigest = public_hash.hexdigest();
 
-print("Server Public Key: %s" %public);
-print("Server Private Key: %s" %private);
+#Server's Public Key Debug
+#print("Server Public Key: %s" %public);
+#Server's Private Key Debug
+#print("Server Private Key: %s" %private);
 
 IP = str(input("Enter Server IP Address: "));
 while(checkIP(IP) == False):
@@ -159,7 +186,8 @@ while(True):
             split = handshake_data["data"].decode('utf-8').split(":");
             tmpClientPublic = split[0];
             clientPublicHash = split[1];
-            print("Anonymous Client's Public Key: {}".format(tmpClientPublic));
+            #Connecting Client's Public Key Debug
+            #print("Anonymous Client's Public Key: {}".format(tmpClientPublic));
             tmpClientPublic = tmpClientPublic.replace("\r\n", '');
             clientPublicHash = clientPublicHash.replace("\r\n", '');
             tmpHashObject = hashlib.sha512(tmpClientPublic.encode('utf-8'));
@@ -170,17 +198,20 @@ while(True):
                 clientPublic = RSA.importKey(tmpClientPublic);
                 pkclient = PKCS1_OAEP.new(clientPublic);
                 ttwoByte = os.urandom(32);
-                print("Client Server Map TTWoByte: %s" %ttwoByte);
+                #Connecting Client's TTwoByte Debug
+                #print("Client Server Map TTWoByte: %s" %ttwoByte);
                 session = hashlib.sha512(ttwoByte);
                 session_hexdigest = session.hexdigest();
                 aes_client_mapping[client_socket] = ttwoByte;
                 fSend = ttwoByte + ":0x0:".encode('utf-8') + session_hexdigest.encode('utf-8') + ":0x0:".encode('utf-8') + public_hash_hexdigest.encode('utf-8');
-                print(fSend);
+                #TTwoByte, Session Hash, and Public Hash Debug
+                #print(fSend);
                 print(" ");
                 #(fSend, ) = clientPublic.encrypt(fSend, None);
                 fSend = pkclient.encrypt(fSend);
                 temp = fSend + "(:0x0:)".encode('utf-8') + public;
-                print(temp);
+                #TTwoByte, Session Hash, Public Hash, and Public Key Debug
+                #print(temp);
                 try:
                     send_message(client_socket, temp, "byte");
                 except Exception as e:
@@ -227,9 +258,7 @@ while(True):
             user_key = aes_client_mapping[socket];
             decrypted_message = recieveEncryptedMessage(socket, user_key);
             if decrypted_message is False:
-                print("Closed connection from: {}".format(client_dic[socket]['data'].decode('utf-8')));
-                socket_list.remove(socket);
-                del client_dic[socket];
+                (socket_list, client_dic) = close_connection(socket, socket_list, client_dic);
                 continue;
             elif decrypted_message["data"][:13] == b'SFTP Initiate':
                 print(f'Received message from {user["data"].decode("utf-8")}: [{str(decrypted_message["integrity"])}] {decrypted_message["data"]}'); #removed ["data"] for user
@@ -248,5 +277,4 @@ while(True):
             else:
                 continue;
     for socket in exception_sockets:
-        socket_list.remove(socket);
-        del client_dic[socket];
+        (socket_list, client_dic) = close_connection(socket, socket_list, client_dic);
