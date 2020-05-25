@@ -6,7 +6,7 @@ This program was created in order to demonstrate simple cryptography and socket 
 
 # Library Dependancies
 
-  - PyCrypto (Download Link: https://pypi.org/project/pycrypto/)
+  - PyCryptoDomex (Download Link: https://pypi.org/project/pycryptodomex/)
   - Tqdm (Download Link: https://pypi.org/project/tqdm/)
   - PyAudio (Download Link: https://pypi.org/project/PyAudio/)
   

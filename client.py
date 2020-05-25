@@ -1,9 +1,9 @@
 from threading import Thread
-from Crypto.Cipher import AES, PKCS1_OAEP;
-from Crypto.PublicKey import RSA;
-from Crypto.Util import Counter;
-from Crypto.Hash import HMAC, SHA512;
-from Crypto import Random;
+from Cryptodome.Cipher import AES, PKCS1_OAEP;
+from Cryptodome.PublicKey import RSA;
+from Cryptodome.Util import Counter;
+from Cryptodome.Hash import HMAC, SHA512;
+from Cryptodome import Random;
 import tqdm;
 import tarfile;
 import socket;
@@ -15,7 +15,7 @@ import pyaudio;
 import threading;
 import time;
 import re;
-import hashlib;
+#import hashlib;
 
 CUSTOM_SEPARATOR = b':0x0:';
 
@@ -85,8 +85,10 @@ def FileDecompressor(tar_file, file_name):
 def UploadFile(socket, address, key, size_uncompressed, size_compressed, buffer=2048):
     #f = open(address, 'rb');
     f = open("temp.tar.gz", "rb");
-    file_hash_uc = hashlib.sha512();
-    file_hash_c = hashlib.sha512();
+    #file_hash_uc = hashlib.sha512();
+    file_hash_uc = SHA512.new();
+    #file_hash_c = hashlib.sha512();
+    file_hash_c = SHA512.new();
     progress = tqdm.tqdm(range(size_compressed),f"Sending {address}", unit="B", unit_scale=True, unit_divisor=1024);
     with open(address, "rb") as filehandle:
         while True:
@@ -107,7 +109,8 @@ def UploadFile(socket, address, key, size_uncompressed, size_compressed, buffer=
 def DownloadFile(socket, name, key, size_uncompressed, size_compressed, buffer=2048):
     #f = open(name, 'wb');
     f = open("temp.tar.gz", "wb");
-    file_hash = hashlib.sha512();
+    #file_hash = hashlib.sha512();
+    file_hash = SHA512.new();
     progress = tqdm.tqdm(range(size_compressed), f"Receiving {name}", unit="B", unit_scale=True, unit_divisor=1024);
     for _ in progress:
         user_data = receive_message(socket);
@@ -125,7 +128,8 @@ def DownloadFile(socket, name, key, size_uncompressed, size_compressed, buffer=2
             if received_file_hash_c == file_hash.hexdigest():
                 FileDecompressor("temp.tar.gz", [name]);
                 with open(name, "rb") as filehandle:
-                    ucfilehash = hashlib.sha512();
+                    #ucfilehash = hashlib.sha512();
+                    ucfilehash = SHA512.new();
                     while True:
                         block = filehandle.read(buffer);
                         if not block:
@@ -239,9 +243,10 @@ HEADER_LENGTH = 10;
 key_256 = b'';
 random_generator = Random.new();
 RSAKey = RSA.generate(4096, random_generator.read);
-public = RSAKey.publickey().exportKey();
-private = RSAKey.exportKey();
-public_hash = hashlib.sha512(public);
+public = RSAKey.publickey().exportKey('DER');
+private = RSAKey.exportKey('DER');
+#public_hash = hashlib.sha512(public);
+public_hash = SHA512.new(public);
 public_hash_hexdigest = public_hash.hexdigest();
 
 #User's Public Key Debug
@@ -269,7 +274,7 @@ except BaseException:
     print(f"{RT.RED}Error Occured During Connection Phase!{RT.RESET}");
     exit(1);
 
-send_message(client_socket, public + ":".encode('utf-8') + public_hash_hexdigest.encode('utf-8'), "byte");
+send_message(client_socket, public + CUSTOM_SEPARATOR + public_hash_hexdigest.encode('utf-8'), "byte");
 
 while(True):
     fGet = receive_message(client_socket);
@@ -286,23 +291,27 @@ serverPublic = split[len(split) - 1];
 #print("Server's Public Key: %s" %serverPublic);
 #Obsolete RSA Import Key
 #decrypted = RSA.importKey(private).decrypt(toDecrypt);
-intermediate = RSA.importKey(private);
+intermediate = RSA.import_key(private);
 decrypted = PKCS1_OAEP.new(intermediate).decrypt(toDecrypt);
-splittedDecrypt = decrypted.split(":0x0:".encode('utf-8'));
+#splittedDecrypt = decrypted.split(":0x0:".encode('utf-8'));
+splittedDecrypt = decrypted.split(CUSTOM_SEPARATOR);
 ttwoByte = splittedDecrypt[0];
 session_hexdigest = splittedDecrypt[1];
 serverPublicHash = splittedDecrypt[2];
 #User's AES Key Hash Debug
 #print("Client's AES Key In Hash: %s" %session_hexdigest);
-sess = hashlib.sha512(ttwoByte);
+
+#sess = hashlib.sha512(ttwoByte);
+sess = SHA512.new(ttwoByte);
 sess_hexdigest = sess.hexdigest();
-hashObj = hashlib.sha512(serverPublic);
+#hashObj = hashlib.sha512(serverPublic);
+hashObj = SHA512.new(serverPublic);
 server_public_hash = hashObj.hexdigest();
 print(f"{RT.YELLOW}Matching Server's Public Key & AES Key...{RT.RESET}");
 if server_public_hash == serverPublicHash.decode('utf-8') and sess_hexdigest == session_hexdigest.decode('utf-8'):
     print(f"{RT.BLUE}Sending Encrypted Session Key...{RT.RESET}");
     #(serverPublic, ) = RSA.importKey(serverPublic).encrypt(ttwoByte, None);
-    intermediate = RSA.importKey(serverPublic);
+    intermediate = RSA.import_key(serverPublic);
     serverPublic = PKCS1_OAEP.new(intermediate).encrypt(ttwoByte);
     send_message(client_socket, serverPublic, "byte");
     print(f"{RT.BLUE}Creating AES Key...{RT.RESET}");
@@ -387,7 +396,8 @@ def receiver_function(sock):
             rusername = user_data["data"];
             decrypted_message_package = recieveEncryptedMessage(sock, key_256);
             decrypted_message = decrypted_message_package["data"];
-            split_decrypted_message = decrypted_message.split(":0x0:".encode('utf-8'));
+            #split_decrypted_message = decrypted_message.split(":0x0:".encode('utf-8'));
+            split_decrypted_message = decrypted_message.split(CUSTOM_SEPARATOR);
             if split_decrypted_message[0] == "SFTP Initiate".encode('utf-8'):
                 procedure_lock.clear();
                 print("Incoming File....");

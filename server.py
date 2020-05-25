@@ -1,13 +1,13 @@
-from Crypto.Hash import HMAC, SHA512;
-from Crypto.PublicKey import RSA
-from Crypto import Random;
-from Crypto.Cipher import AES, PKCS1_OAEP;
-from Crypto.Util import Counter;
+from Cryptodome.Hash import HMAC, SHA512;
+from Cryptodome.PublicKey import RSA
+from Cryptodome import Random;
+from Cryptodome.Cipher import AES, PKCS1_OAEP;
+from Cryptodome.Util import Counter;
 import socket;
 import select;
 import os;
-import hashlib;
 import re;
+#import hashlib;
 
 CUSTOM_SEPARATOR = b':0x0:';
 
@@ -157,13 +157,15 @@ def checkPort(port):
 
 HEADER_LENGTH = 10;
 
-hasher = hashlib.sha512();
+#hasher = hashlib.sha512();
+hasher = SHA512.new();
 
 random_generator = Random.new();
 RSAkey = RSA.generate(4096, random_generator.read);
-public = RSAkey.publickey().exportKey();
-private = RSAkey.exportKey();
-public_hash = hashlib.sha512(public);
+public = RSAkey.publickey().exportKey('DER');
+private = RSAkey.exportKey('DER');
+#public_hash = hashlib.sha512(public);
+public_hash = SHA512.new(public);
 public_hash_hexdigest = public_hash.hexdigest();
 
 #Server's Public Key Debug
@@ -205,30 +207,38 @@ while(True):
             client_socket, client_address = server_socket.accept();
             print(f"{RT.YELLOW}A Client Is Trying To Connect...{RT.RESET}");
             handshake_data = receive_message(client_socket);
-            split = handshake_data["data"].decode('utf-8').split(":");
+            #split = handshake_data["data"].decode('utf-8').split(":");
+            split = handshake_data["data"].split(CUSTOM_SEPARATOR);
             tmpClientPublic = split[0];
             clientPublicHash = split[1];
             #Connecting Client's Public Key Debug
             #print("Anonymous Client's Public Key: {}".format(tmpClientPublic));
-            tmpClientPublic = tmpClientPublic.replace("\r\n", '');
-            clientPublicHash = clientPublicHash.replace("\r\n", '');
-            tmpHashObject = hashlib.sha512(tmpClientPublic.encode('utf-8'));
+
+            #tmpClientPublic = tmpClientPublic.replace("\r\n", '');
+            tmpClientPublic = tmpClientPublic.replace(b'\r\n', b'');
+            #clientPublicHash = clientPublicHash.replace("\r\n", '');
+            clientPublicHash = clientPublicHash.replace(b"\r\n", b'');
+            #tmpHashObject = hashlib.sha512(tmpClientPublic.encode('utf-8'));
+            #tmpHashObject = SHA512.new(tmpClientPublic.encode('utf-8')); 
+            tmpHashObject = SHA512.new(tmpClientPublic); 
             tmphash = tmpHashObject.hexdigest();
 
-            if tmphash == clientPublicHash:
+            if tmphash == clientPublicHash.decode('utf-8'):
                 print(f"{RT.BLUE}Client's Public Key and Public Key Hash Matched!{RT.RESET}");
-                clientPublic = RSA.importKey(tmpClientPublic);
+                clientPublic = RSA.import_key(tmpClientPublic);
                 pkclient = PKCS1_OAEP.new(clientPublic);
                 ttwoByte = os.urandom(32);
                 #Connecting Client's TTwoByte Debug
                 #print("Client Server Map TTWoByte: %s" %ttwoByte);
-                session = hashlib.sha512(ttwoByte);
+
+                #session = hashlib.sha512(ttwoByte);
+                session = SHA512.new(ttwoByte);
                 session_hexdigest = session.hexdigest();
                 aes_client_mapping[client_socket] = ttwoByte;
-                fSend = ttwoByte + ":0x0:".encode('utf-8') + session_hexdigest.encode('utf-8') + ":0x0:".encode('utf-8') + public_hash_hexdigest.encode('utf-8');
+                #fSend = ttwoByte + ":0x0:".encode('utf-8') + session_hexdigest.encode('utf-8') + ":0x0:".encode('utf-8') + public_hash_hexdigest.encode('utf-8');
+                fSend = ttwoByte + CUSTOM_SEPARATOR + session_hexdigest.encode('utf-8') + CUSTOM_SEPARATOR + public_hash_hexdigest.encode('utf-8');
                 #TTwoByte, Session Hash, and Public Hash Debug
                 #print(fSend);
-                print(" ");
                 #(fSend, ) = clientPublic.encrypt(fSend, None);
                 fSend = pkclient.encrypt(fSend);
                 temp = fSend + "(:0x0:)".encode('utf-8') + public;
@@ -250,7 +260,7 @@ while(True):
                 
                 if clientPH["data"] != "".encode('utf-8'):
                     #clientPH_other = RSA.importKey(private).decrypt(clientPH["data"]);
-                    intermediate = RSA.importKey(private);
+                    intermediate = RSA.import_key(private);
                     clientPH_other = PKCS1_OAEP.new(intermediate).decrypt(clientPH["data"]);
                     print(f"{RT.BLUE}Matching Session Key...{RT.RESET}");
                     if clientPH_other == ttwoByte:
