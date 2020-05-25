@@ -3,7 +3,6 @@ from Crypto.PublicKey import RSA
 from Crypto import Random;
 from Crypto.Cipher import AES, PKCS1_OAEP;
 from Crypto.Util import Counter;
-from termcolor import colored;
 import socket;
 import select;
 import os;
@@ -11,6 +10,29 @@ import hashlib;
 import re;
 
 CUSTOM_SEPARATOR = b':0x0:';
+
+class RT:
+    #Text
+    BLACK = '\u001b[30m';
+    RED = '\u001b[31m';
+    GREEN = '\u001b[32m';
+    YELLOW = '\u001b[33m';
+    BLUE = '\u001b[34m';
+    MAGENTA = '\u001b[35m';
+    CYAN = '\u001b[36m';
+    WHITE = '\u001b[37m';
+    
+    #Background
+    BBLACK = '\u001b[40m';
+    BRED = '\u001b[41m';
+    BGREEN = '\u001b[42m';
+    BYELLOW = '\u001b[43m';
+    BBLUE = '\u001b[44m';
+    BMAGENTA = '\u001b[45m';
+    BCYAN = '\u001b[46m';
+    BWHITE = '\u001b[47m';
+
+    RESET = '\u001b[0m';
 
 def HMACher(data, key, check_mode_var=""):
     hmac = HMAC.new(key, data, SHA512);
@@ -163,9 +185,9 @@ try:
     print("Binding to socket tuple...");
     server_socket.bind((IP, Port));
     server_socket.listen();
-    print(colored("Successfully Binded!", "green"));
+    print(f"{RT.GREEN}Successfully Binded!{RT.RESET}");
 except Exception as e:
-    print(colored("Error In The Binding Process!", "red"));
+    print(f"{RT.RED}Error In The Binding Process!{RT.RESET}");
     print(e);
     exit(1);
 
@@ -173,15 +195,15 @@ socket_list = [server_socket];
 client_dic = {};
 aes_client_mapping = {};
 
-print(colored("Server Connection Successfully Setup!", "green"));
-print(colored(f"Listening for connections on {IP}:{Port}...", "magenta"));
+print(f"{RT.GREEN}Server Connection Successfully Setup!{RT.RESET}");
+print(f"{RT.MAGENTA}Listening for connections on {IP}:{Port}...{RT.RESET}");
 
 while(True):
     read_sockets, write_sockets, exception_sockets = select.select(socket_list, [], socket_list);
     for socket in read_sockets:
         if socket == server_socket:
             client_socket, client_address = server_socket.accept();
-            print(colored("A Client Is Trying To Connect...", "yellow"));
+            print(f"{RT.YELLOW}A Client Is Trying To Connect...{RT.RESET}");
             handshake_data = receive_message(client_socket);
             split = handshake_data["data"].decode('utf-8').split(":");
             tmpClientPublic = split[0];
@@ -194,7 +216,7 @@ while(True):
             tmphash = tmpHashObject.hexdigest();
 
             if tmphash == clientPublicHash:
-                print(colored("Client's Public Key and Public Key Hash Matched!", "blue"));
+                print(f"{RT.BLUE}Client's Public Key and Public Key Hash Matched!{RT.RESET}");
                 clientPublic = RSA.importKey(tmpClientPublic);
                 pkclient = PKCS1_OAEP.new(clientPublic);
                 ttwoByte = os.urandom(32);
@@ -215,7 +237,7 @@ while(True):
                 try:
                     send_message(client_socket, temp, "byte");
                 except Exception as e:
-                    print(colored("Error while Sending fSend!", "red"));
+                    print(f"{RT.RED}Error while Sending fSend!{RT.RESET}");
                     print(e);
                     exit(1);
 
@@ -230,16 +252,16 @@ while(True):
                     #clientPH_other = RSA.importKey(private).decrypt(clientPH["data"]);
                     intermediate = RSA.importKey(private);
                     clientPH_other = PKCS1_OAEP.new(intermediate).decrypt(clientPH["data"]);
-                    print(colored("Matching Session Key...", "blue"));
+                    print(f"{RT.BLUE}Matching Session Key...{RT.RESET}");
                     if clientPH_other == ttwoByte:
-                        print(colored("Creating AES Key...", "blue"));
+                        print(f"{RT.BLUE}Creating AES Key...{RT.RESET}");
                         key_256 = ttwoByte;
                         client_msg = AESEncrypt(key_256, "Ready".encode('utf-8'));
                         send_message(client_socket, client_msg, "byte");
-                        print(colored("Waiting For Client's Username...", "blue"));
+                        print(f"{RT.BLUE}Waiting For Client's Username...{RT.RESET}");
                         user = recieveEncryptedMessage(client_socket, key_256);
                         if user is False:
-                            print(colored("Error While receiving username! Halting Handshake", "red"));
+                            print(f"{RT.RED}Error While receiving username! Halting Handshake{RT.RESET}");
                             continue;
                         socket_list.append(client_socket);
                         client_dic[client_socket] = user;
@@ -249,9 +271,9 @@ while(True):
                         literal_header = f"{len(literal):<{HEADER_LENGTH}}".encode('utf-8');
                         broadcast(client_socket, user["data"], literal, type="byte");
                     else:
-                        print(colored("Session Key From Client Does Not Match!", "red"));
+                        print(f"{RT.RED}Session Key From Client Does Not Match!{RT.RESET}");
             else:
-                print(colored("Could Not Match Client's Public Hash! Exiting...", "red"));
+                print(f"{RT.RED}Could Not Match Client's Public Hash! Exiting...{RT.RESET}");
                 exit(1);
         else:
             user = client_dic[socket];

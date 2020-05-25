@@ -4,7 +4,6 @@ from Crypto.PublicKey import RSA;
 from Crypto.Util import Counter;
 from Crypto.Hash import HMAC, SHA512;
 from Crypto import Random;
-from termcolor import colored;
 import tqdm;
 import tarfile;
 import socket;
@@ -19,6 +18,29 @@ import re;
 import hashlib;
 
 CUSTOM_SEPARATOR = b':0x0:';
+
+class RT:
+    #Text
+    BLACK = '\u001b[30m';
+    RED = '\u001b[31m';
+    GREEN = '\u001b[32m';
+    YELLOW = '\u001b[33m';
+    BLUE = '\u001b[34m';
+    MAGENTA = '\u001b[35m';
+    CYAN = '\u001b[36m';
+    WHITE = '\u001b[37m';
+    
+    #Background
+    BBLACK = '\u001b[40m';
+    BRED = '\u001b[41m';
+    BGREEN = '\u001b[42m';
+    BYELLOW = '\u001b[43m';
+    BBLUE = '\u001b[44m';
+    BMAGENTA = '\u001b[45m';
+    BCYAN = '\u001b[46m';
+    BWHITE = '\u001b[47m';
+
+    RESET = '\u001b[0m';
 
 def VoIPInitialize(chunk_size=1024, audio_format=pyaudio.paInt16, channels=1, rate=20000):
     p = pyaudio.PyAudio();
@@ -95,7 +117,7 @@ def DownloadFile(socket, name, key, size_uncompressed, size_compressed, buffer=2
             progress.update(len(l));
             file_hash.update(l);
         else:
-            print(colored("SFTP END", "blue"));
+            print(f"{RT.BLUE}SFTP END{RT.RESET}");
             f.close();
             split_data = l.split(CUSTOM_SEPARATOR);
             received_file_hash_uc = split_data[1].decode('utf-8');
@@ -111,10 +133,10 @@ def DownloadFile(socket, name, key, size_uncompressed, size_compressed, buffer=2
                         ucfilehash.update(block);
             filehandle.close();
             if received_file_hash_c == file_hash.hexdigest() and received_file_hash_uc == ucfilehash.hexdigest():
-                print(colored("SFTP Checksum Matched!", "green"));
+                print(f"{RT.GREEN}SFTP Checksum Matched!{RT.RESET}");
                 break;
             else:
-                print(colored("SFTP Checksum Did Not Match! File Is Corrupt", "red"));
+                print(f"{RT.RED}SFTP Checksum Did Not Match! File Is Corrupt{RT.RESET}");
                 break;  
 
 def HMACher(data, key, check_mode_var=""):
@@ -241,10 +263,10 @@ try:
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM);
     print("Connecting to Server...");
     client_socket.connect((IP, Port));
-    print(colored("Connected!", "green"));
+    print(f"{RT.GREEN}Connected!{RT.RESET}");
     client_socket.setblocking(False);
 except BaseException:
-    print(colored("Error Occured During Connection Phase!", "red"));
+    print(f"{RT.RED}Error Occured During Connection Phase!{RT.RESET}");
     exit(1);
 
 send_message(client_socket, public + ":".encode('utf-8') + public_hash_hexdigest.encode('utf-8'), "byte");
@@ -276,14 +298,14 @@ sess = hashlib.sha512(ttwoByte);
 sess_hexdigest = sess.hexdigest();
 hashObj = hashlib.sha512(serverPublic);
 server_public_hash = hashObj.hexdigest();
-print(colored("Matching Server's Public Key & AES Key...", "yellow"));
+print(f"{RT.YELLOW}Matching Server's Public Key & AES Key...{RT.RESET}");
 if server_public_hash == serverPublicHash.decode('utf-8') and sess_hexdigest == session_hexdigest.decode('utf-8'):
-    print(colored("Sending Encrypted Session Key...", "blue"));
+    print(f"{RT.BLUE}Sending Encrypted Session Key...{RT.RESET}");
     #(serverPublic, ) = RSA.importKey(serverPublic).encrypt(ttwoByte, None);
     intermediate = RSA.importKey(serverPublic);
     serverPublic = PKCS1_OAEP.new(intermediate).encrypt(ttwoByte);
     send_message(client_socket, serverPublic, "byte");
-    print(colored("Creating AES Key...", "blue"));
+    print(f"{RT.BLUE}Creating AES Key...{RT.RESET}");
     key_256 = ttwoByte;
     try:
         while(True):
@@ -293,14 +315,14 @@ if server_public_hash == serverPublicHash.decode('utf-8') and sess_hexdigest == 
             else:
                 break;
     except Exception as e:
-        print(colored("Error Occurred During Second Phase Of Handshake Sequence!", "red"));
+        print(f"{RT.RED}Error Occurred During Second Phase Of Handshake Sequence!{RT.RESET}");
         print(e);
         exit(1);
     ready_msg = AESDecrypt(key_256, ready["data"]);
     if ready_msg == "Ready".encode('utf-8'):
-        print(colored("Client Is Ready To Communicate!", "green"));
+        print(f"{RT.GREEN}Client Is Ready To Communicate!{RT.RESET}");
     else:
-        print(colored("Server's Public || Session Key Doesn't Match. Shutting Down Socket!", "red"));
+        print(f"{RT.RED}Server's Public || Session Key Doesn't Match. Shutting Down Socket!{RT.RESET}");
         client_socket.close();
         exit(1);
 
@@ -325,7 +347,7 @@ def sender_function(sock):
                 user_data = receive_message(sock);
                 confirmation = recieveEncryptedMessage(sock, key_256)["data"];
                 if confirmation == "VoIP Reject".encode('utf-8'):
-                    print(colored("VoIP Rejected By End User!", "blue"));
+                    print(f"{RT.BLUE}VoIP Rejected By End User!{RT.RESET}");
                     prompt();
                     continue;
                 elif confirmation == "VoIP Accept".encode('utf-8'):
@@ -398,7 +420,7 @@ def receiver_function(sock):
                     prompt();
                     continue;
                 else:
-                    print(colored("Invalid Input. Quitting!", "red"));
+                    print(f"{RT.RED}Invalid Input. Quitting!{RT.RESET}");
                     sys.exit(1);
             if decrypted_message_package["integrity"]:
                 print(f"{rusername.decode('utf-8')} > [I] {decrypted_message.decode('utf-8')}");

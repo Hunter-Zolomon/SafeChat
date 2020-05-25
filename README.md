@@ -7,7 +7,7 @@ This program was created in order to demonstrate simple cryptography and socket 
 # Library Dependancies
 
   - PyCrypto (Download Link: https://pypi.org/project/pycrypto/)
-  - Termcolor (Download Link: https://pypi.org/project/termcolor/)
+  - Tqdm (Download Link: https://pypi.org/project/tqdm/)
   - PyAudio (Download Link: https://pypi.org/project/PyAudio/)
   
 # Usage
@@ -17,7 +17,7 @@ You will be asked to enter the IP address of the interface & a static Port to us
 
 Every client has to run the client module in order to connect and initiate comms:
     `python3 client.py`
-You will be asked to enter the IP address of the interface, a static Port and a username as an identifier in the chatroom. When you see the prompt **<You>** you can start sending/receiving messages.
+You will be asked to enter the IP address of the interface, a static Port and a username as an identifier in the chatroom. When you see the prompt `<You>`, you can start sending/receiving messages.
 
 # Future Plans
 1. Increased security through improved encryption protocol (Forward Secrecy, EC).
