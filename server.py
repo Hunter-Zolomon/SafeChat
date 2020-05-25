@@ -1,5 +1,6 @@
 from Cryptodome.Hash import HMAC, SHA512;
 from Cryptodome.PublicKey import RSA
+from Cryptodome.Signature import pss;
 from Cryptodome import Random;
 from Cryptodome.Cipher import AES, PKCS1_OAEP;
 from Cryptodome.Util import Counter;
@@ -211,6 +212,7 @@ while(True):
             split = handshake_data["data"].split(CUSTOM_SEPARATOR);
             tmpClientPublic = split[0];
             clientPublicHash = split[1];
+            clientSignature = split[2];
             #Connecting Client's Public Key Debug
             #print("Anonymous Client's Public Key: {}".format(tmpClientPublic));
 
@@ -226,6 +228,15 @@ while(True):
             if tmphash == clientPublicHash.decode('utf-8'):
                 print(f"{RT.BLUE}Client's Public Key and Public Key Hash Matched!{RT.RESET}");
                 clientPublic = RSA.import_key(tmpClientPublic);
+                signature_hash = SHA512.new(tmpClientPublic + CUSTOM_SEPARATOR + clientPublicHash);
+                verifier = pss.new(clientPublic);
+                try:
+                    verifier.verify(signature_hash, clientSignature);
+                    print(f"{RT.CYAN}Client Signature Verified!{RT.RESET}");
+                except (ValueError, TypeError):
+                    print(f"{RT.RED}Could Not Verify Client's Signature! Rejecting Connection!{RT.RESET}");
+                    close_connection(client_socket, socket_list, client_dic);
+                    continue;
                 pkclient = PKCS1_OAEP.new(clientPublic);
                 ttwoByte = os.urandom(32);
                 #Connecting Client's TTwoByte Debug
@@ -284,7 +295,8 @@ while(True):
                         print(f"{RT.RED}Session Key From Client Does Not Match!{RT.RESET}");
             else:
                 print(f"{RT.RED}Could Not Match Client's Public Hash! Exiting...{RT.RESET}");
-                exit(1);
+                close_connection(client_socket, socket_list, client_dic);
+                continue;
         else:
             user = client_dic[socket];
             user_key = aes_client_mapping[socket];

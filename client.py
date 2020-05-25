@@ -1,6 +1,7 @@
 from threading import Thread
 from Cryptodome.Cipher import AES, PKCS1_OAEP;
 from Cryptodome.PublicKey import RSA;
+from Cryptodome.Signature import pss;
 from Cryptodome.Util import Counter;
 from Cryptodome.Hash import HMAC, SHA512;
 from Cryptodome import Random;
@@ -249,6 +250,10 @@ private = RSAKey.exportKey('DER');
 public_hash = SHA512.new(public);
 public_hash_hexdigest = public_hash.hexdigest();
 
+first_exchange_msg = public + CUSTOM_SEPARATOR + public_hash_hexdigest.encode('utf-8');
+first_exchange_msg_hashobj = SHA512.new(first_exchange_msg);
+signature = pss.new(RSAKey).sign(first_exchange_msg_hashobj);
+
 #User's Public Key Debug
 #print("Your Public Key: %s" %public); 
 #User's Private Key Debug
@@ -274,7 +279,7 @@ except BaseException:
     print(f"{RT.RED}Error Occured During Connection Phase!{RT.RESET}");
     exit(1);
 
-send_message(client_socket, public + CUSTOM_SEPARATOR + public_hash_hexdigest.encode('utf-8'), "byte");
+send_message(client_socket, first_exchange_msg + CUSTOM_SEPARATOR + signature, "byte");
 
 while(True):
     fGet = receive_message(client_socket);
