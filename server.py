@@ -130,15 +130,21 @@ def broadcast(client_socket, user, message, type="byte"):
                 socket_list.remove(socket);
 
 def close_connection(socket, sock_list, client_dictionary):
-    user = client_dictionary[socket]["data"]
-    print("Closed connection from: {}".format(user.decode('utf-8')));
-    literal = f"[{user.decode('utf-8')}] Has Left The Chat";
-    literal = literal.encode('utf-8');
-    literal_header = f"{len(literal):<{HEADER_LENGTH}}".encode('utf-8');
-    broadcast(socket, user, literal, type="byte");
-    sock_list.remove(socket);
-    del client_dictionary[socket];
-    return (sock_list, client_dictionary);
+    if len(client_dictionary):
+        user = client_dictionary[socket]["data"];
+        print("Closed connection from: {}".format(user.decode('utf-8')));
+        literal = f"[{user.decode('utf-8')}] Has Left The Chat";
+        literal = literal.encode('utf-8');
+        literal_header = f"{len(literal):<{HEADER_LENGTH}}".encode('utf-8');
+        broadcast(socket, user, literal, type="byte");
+        sock_list.remove(socket);
+        del client_dictionary[socket];
+        return (sock_list, client_dictionary);
+    else:
+        print("Closed connection from: UNKNOWN");
+        sock_list.remove(socket);
+        return (sock_list, client_dictionary);
+    
 
 def checkIP(ip):
     regex = '''^(25[0-5]|2[0-4][0-9]|[0-1]?[0-9][0-9]?)\.( 
@@ -283,6 +289,7 @@ while(True):
                         user = recieveEncryptedMessage(client_socket, key_256);
                         if user is False:
                             print(f"{RT.RED}Error While receiving username! Halting Handshake{RT.RESET}");
+                            close_connection(client_socket, socket_list, client_dic);
                             continue;
                         socket_list.append(client_socket);
                         client_dic[client_socket] = user;
@@ -293,6 +300,8 @@ while(True):
                         broadcast(client_socket, user["data"], literal, type="byte");
                     else:
                         print(f"{RT.RED}Session Key From Client Does Not Match!{RT.RESET}");
+                        close_connection(client_socket, socket_list, client_dic);
+                        continue;
             else:
                 print(f"{RT.RED}Could Not Match Client's Public Hash! Exiting...{RT.RESET}");
                 close_connection(client_socket, socket_list, client_dic);

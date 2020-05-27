@@ -101,6 +101,7 @@ def UploadFile(socket, address, key, size_uncompressed, size_compressed, buffer=
         l = f.read(buffer);
         if not l:
             break;
+        read_socket, write_socket, exception_socket = select.select([], [socket], []);
         sendEncryptedMessage(socket, l, key);
         progress.update(len(l));
         file_hash_c.update(l);
@@ -202,7 +203,7 @@ def receive_message(client_socket):
         #return {'header': message_header, 'data': client_socket.recv(message_length)};
         return {'header': message_header, 'data': recv_exact(client_socket, message_length)};
         pass;
-    except:
+    except Exception as e:
         return False;
 
 def recieveEncryptedMessage(client_socket, AESKey):
@@ -406,15 +407,15 @@ def receiver_function(sock):
             if split_decrypted_message[0] == "SFTP Initiate".encode('utf-8'):
                 procedure_lock.clear();
                 print("Incoming File....");
-                prompt("Enter File Name: ");
-                name = sys.stdin.readline().strip();
+                #prompt("Enter File Name: ");
+                #name = sys.stdin.readline().strip();
                 dfilename = split_decrypted_message[1].decode('utf-8').strip();
                 filesize_uc = split_decrypted_message[2];
                 filesize_c = split_decrypted_message[3];
-                if (name == "x0default0x"):
-                    DownloadFile(sock, dfilename, key_256, int(filesize_uc), int(filesize_c), 16384);
-                else:
-                    DownloadFile(sock, name, key_256, int(filesize_uc), int(filesize_c),16384);
+                #if (name == "x0default0x"):
+                DownloadFile(sock, dfilename, key_256, int(filesize_uc), int(filesize_c), 16384);
+                #else:
+                #    DownloadFile(sock, name, key_256, int(filesize_uc), int(filesize_c),16384);
                 os.remove("temp.tar.gz");
                 prompt();
                 procedure_lock.set();
