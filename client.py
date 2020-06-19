@@ -6,6 +6,8 @@ from Cryptodome.Util import Counter;
 from Cryptodome.Hash import HMAC, SHA512;
 from Cryptodome import Random;
 import tqdm;
+import traceback;
+import atexit;
 import tarfile;
 import socket;
 import select;
@@ -19,6 +21,7 @@ import re;
 #import hashlib;
 
 CUSTOM_SEPARATOR = b':0x0:';
+logfilehandle = open("client_log.txt", "w");
 
 class RT:
     #Text
@@ -101,7 +104,7 @@ def UploadFile(socket, address, key, size_uncompressed, size_compressed, buffer=
         l = f.read(buffer);
         if not l:
             break;
-        read_socket, write_socket, exception_socket = select.select([], [socket], []);
+        select.select([], [socket], []);
         sendEncryptedMessage(socket, l, key);
         progress.update(len(l));
         file_hash_c.update(l);
@@ -115,6 +118,7 @@ def DownloadFile(socket, name, key, size_uncompressed, size_compressed, buffer=2
     file_hash = SHA512.new();
     progress = tqdm.tqdm(range(size_compressed), f"Receiving {name}", unit="B", unit_scale=True, unit_divisor=1024);
     for _ in progress:
+        select.select([client_socket], [], []);
         user_data = receive_message(socket);
         l = recieveEncryptedMessage(socket, key)["data"];
         if (l[:8] != "SFTP END".encode('utf-8')):
@@ -186,8 +190,17 @@ def sendEncryptedMessage(client_socket, message, AESKey):
 def recv_exact(socket, size):
     buflist = [];
     while size:
-        buf = socket.recv(size);
+        while(True):
+            try:
+                buf = socket.recv(size);
+                break;
+            except IOError as e:
+                if e.errno != errno.EAGAIN and e.errno != errno.EWOULDBLOCK:
+                    sys.exit();
+                else:
+                    continue;
         if not buf:
+            logfilehandle.write("recv_exact(): Failed prematurely\n");
             return False;
         buflist.append(buf);
         size -= len(buf);
@@ -198,12 +211,22 @@ def receive_message(client_socket):
         #message_header = client_socket.recv(HEADER_LENGTH);
         message_header = recv_exact(client_socket, HEADER_LENGTH);
         if not len(message_header):
+            logfilehandle.write("receive_message(): Failed prematurely\n");
             return False;
         message_length = int(message_header.decode('utf-8').strip());
         #return {'header': message_header, 'data': client_socket.recv(message_length)};
         return {'header': message_header, 'data': recv_exact(client_socket, message_length)};
-        pass;
+    except IOError as e:
+        if e.errno != errno.EAGAIN and e.errno != errno.EWOULDBLOCK:
+            print("Reading error: {}".format(str(e)));
+            logfilehandle.write("receive_message(): " + str(e) + "\n");
+            logfilehandle.close();
+            sys.exit();
+        else:
+            logfilehandle.write("Stack: " + traceback.format_exc() + "\n");
+            raise;
     except Exception as e:
+        logfilehandle.write("receive_message(): " + str(e) + "\n");
         return False;
 
 def recieveEncryptedMessage(client_socket, AESKey):
@@ -218,6 +241,7 @@ def recieveEncryptedMessage(client_socket, AESKey):
         else:
             return {'header': whole_message["header"], 'data': plain_message, 'integrity': False};
     except Exception as e:
+        logfilehandle.write("recieveEncryptedMessage(): " + str(e) + "\n");
         return False;
 
 def checkIP(ip):
@@ -278,16 +302,24 @@ try:
     client_socket.setblocking(False);
 except BaseException:
     print(f"{RT.RED}Error Occured During Connection Phase!{RT.RESET}");
+    logfilehandle.write("Socket Connection Error: " + str(e) + "\n");
+    logfilehandle.close();
     exit(1);
 
 send_message(client_socket, first_exchange_msg + CUSTOM_SEPARATOR + signature, "byte");
 
-while(True):
+"""while(True):
     fGet = receive_message(client_socket);
     if fGet == False:
         continue;
     else:
-        break;
+        break;"""
+while(True):
+    try:
+        fGet = receive_message(client_socket);
+    except:
+        continue;
+    break;
 split = fGet["data"].split("(:0x0:)".encode('utf-8'));
 toDecrypt = ''.encode('utf-8');
 for i in range(0, len(split) - 1):
@@ -323,15 +355,22 @@ if server_public_hash == serverPublicHash.decode('utf-8') and sess_hexdigest == 
     print(f"{RT.BLUE}Creating AES Key...{RT.RESET}");
     key_256 = ttwoByte;
     try:
-        while(True):
+        """while(True):
             ready = receive_message(client_socket);
             if ready == False:
                 continue;
             else:
-                break;
+                break;"""
+        while(True):
+            try:
+                ready = receive_message(client_socket);
+            except:
+                continue;
+            break;
     except Exception as e:
         print(f"{RT.RED}Error Occurred During Second Phase Of Handshake Sequence!{RT.RESET}");
-        print(e);
+        logfilehandle.write("Handshake Error: " + str(e) + "\n");
+        logfilehandle.close();
         exit(1);
     ready_msg = AESDecrypt(key_256, ready["data"]);
     if ready_msg == "Ready".encode('utf-8'):
@@ -446,9 +485,13 @@ def receiver_function(sock):
         except IOError as e:
             if e.errno != errno.EAGAIN and e.errno != errno.EWOULDBLOCK:
                 print("Reading error: {}".format(str(e)));
+                logfilehandle.write("IOError: " + str(e) + "\n");
+                logfilehandle.close();
                 sys.exit();
         except Exception as e:
             print("General Error {}".format(str(e)));
+            logfilehandle.write("General Error: " + str(e) + "\n");
+            logfilehandle.close();
             sys.exit();
 
 procedure_lock = threading.Event();
@@ -456,3 +499,9 @@ procedure_lock.set();
 
 Thread(target=sender_function, args=(client_socket,), daemon=True).start();
 Thread(target=receiver_function, args=(client_socket,)).start();
+
+def exit_cleanup():
+    print(f"{RT.RED}Exiting Program{RT.RESET}");
+    logfilehandle.close();
+
+atexit.register(exit_cleanup);
