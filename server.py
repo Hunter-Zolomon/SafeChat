@@ -11,6 +11,11 @@ import re;
 #import hashlib;
 
 CUSTOM_SEPARATOR = b':0x0:';
+socket_list = [];
+socket_list_vocom = [];
+client_dic = {};
+client_dic_vocom = {};
+aes_client_mapping = {};
 
 class RT:
     #Text
@@ -89,7 +94,10 @@ def receive_message(client_socket):
         message_header = recv_exact(client_socket, HEADER_LENGTH);
         if not len(message_header):
             return False;
-        message_length = int(message_header.decode('utf-8').strip());
+        try:
+            message_length = int(message_header.decode('utf-8').strip());
+        except Exception as e:
+            print("Int conversion failed. Probably recv overflow: " + str(e));
         #return {'header': message_header, 'data': client_socket.recv(message_length)};
         return {'header': message_header, 'data': recv_exact(client_socket, message_length)};
         pass;
@@ -115,8 +123,8 @@ def recieveEncryptedMessage(client_socket, AESKey, passthrough=False):
         print(e);
         return False;
 
-def broadcast(client_socket, user, message, type="byte"):
-    for socket in socket_list:
+def broadcast(client_socket, user, message, type="byte", socket_array=socket_list):
+    for socket in socket_array:
         if socket != server_socket and socket != client_socket:
             try:
                 username_header = f"{len(user):<{HEADER_LENGTH}}".encode('utf-8');
@@ -129,7 +137,7 @@ def broadcast(client_socket, user, message, type="byte"):
                 socket.close();
                 socket_list.remove(socket);
 
-def close_connection(socket, sock_list, client_dictionary):
+def close_connection(socket, sock_list, sock_list_vocom, client_dictionary, client_dictionary_vocom):
     if len(client_dictionary):
         user = client_dictionary[socket]["data"];
         print("Closed connection from: {}".format(user.decode('utf-8')));
@@ -137,13 +145,17 @@ def close_connection(socket, sock_list, client_dictionary):
         literal = literal.encode('utf-8');
         literal_header = f"{len(literal):<{HEADER_LENGTH}}".encode('utf-8');
         broadcast(socket, user, literal, type="byte");
-        sock_list.remove(socket);
-        del client_dictionary[socket];
-        return (sock_list, client_dictionary);
+        if socket in sock_list: sock_list.remove(socket);
+        if socket in socket_list_vocom: sock_list_vocom.remove(socket);
+        if socket in client_dictionary: del client_dictionary[socket];
+        if socket in client_dictionary_vocom: del client_dictionary_vocom[socket];
+        if socket in aes_client_mapping: del aes_client_mapping[socket];
+        return [sock_list, sock_list_vocom, client_dictionary, client_dictionary_vocom];
     else:
         print("Closed connection from: UNKNOWN");
-        sock_list.remove(socket);
-        return (sock_list, client_dictionary);
+        if socket in sock_list: sock_list.remove(socket);
+        if socket in socket_list_vocom: sock_list_vocom.remove(socket);
+        return [sock_list, sock_list_vocom, client_dictionary, client_dictionary_vocom];
     
 
 def checkIP(ip):
@@ -200,9 +212,8 @@ except Exception as e:
     print(e);
     exit(1);
 
-socket_list = [server_socket];
-client_dic = {};
-aes_client_mapping = {};
+socket_list.append(server_socket);
+socket_list_vocom.append(server_socket);
 
 print(f"{RT.GREEN}Server Connection Successfully Setup!{RT.RESET}");
 print(f"{RT.MAGENTA}Listening for connections on {IP}:{Port}...{RT.RESET}");
@@ -241,7 +252,7 @@ while(True):
                     print(f"{RT.CYAN}Client Signature Verified!{RT.RESET}");
                 except (ValueError, TypeError):
                     print(f"{RT.RED}Could Not Verify Client's Signature! Rejecting Connection!{RT.RESET}");
-                    close_connection(client_socket, socket_list, client_dic);
+                    close_connection(client_socket, socket_list, socket_list_vocom, client_dic, client_dic_vocom);
                     continue;
                 pkclient = PKCS1_OAEP.new(clientPublic);
                 ttwoByte = os.urandom(32);
@@ -289,7 +300,7 @@ while(True):
                         user = recieveEncryptedMessage(client_socket, key_256);
                         if user is False:
                             print(f"{RT.RED}Error While receiving username! Halting Handshake{RT.RESET}");
-                            close_connection(client_socket, socket_list, client_dic);
+                            close_connection(client_socket, socket_list, socket_list_vocom, client_dic, client_dic_vocom);
                             continue;
                         socket_list.append(client_socket);
                         client_dic[client_socket] = user;
@@ -300,18 +311,25 @@ while(True):
                         broadcast(client_socket, user["data"], literal, type="byte");
                     else:
                         print(f"{RT.RED}Session Key From Client Does Not Match!{RT.RESET}");
-                        close_connection(client_socket, socket_list, client_dic);
+                        close_connection(client_socket, socket_list, socket_list_vocom, client_dic, client_dic_vocom);
                         continue;
             else:
                 print(f"{RT.RED}Could Not Match Client's Public Hash! Exiting...{RT.RESET}");
-                close_connection(client_socket, socket_list, client_dic);
+                close_connection(client_socket, socket_list, socket_list_vocom, client_dic, client_dic_vocom);
                 continue;
         else:
             user = client_dic[socket];
             user_key = aes_client_mapping[socket];
+            if socket in client_dic_vocom:
+                decrypted_message = recieveEncryptedMessage(socket, user_key, True);
+                if decrypted_message is False:
+                    close_connection(socket, socket_list, socket_list_vocom, client_dic, client_dic_vocom);
+                    continue;
+                broadcast(socket, user["data"], decrypted_message["data"], "byte", socket_list_vocom);
+                continue;
             decrypted_message = recieveEncryptedMessage(socket, user_key);
             if decrypted_message is False:
-                (socket_list, client_dic) = close_connection(socket, socket_list, client_dic);
+                close_connection(socket, socket_list, socket_list_vocom, client_dic, client_dic_vocom);
                 continue;
             elif decrypted_message["data"][:13] == b'SFTP Initiate':
                 print(f'Received message from {user["data"].decode("utf-8")}: [{str(decrypted_message["integrity"])}] {decrypted_message["data"]}'); #removed ["data"] for user
@@ -323,11 +341,14 @@ while(True):
                 print(f'Received message from {user["data"].decode("utf-8")}: [{str(decrypted_message["integrity"])}] {decrypted_message["data"]}'); #removed ["data"] for user
                 broadcast(socket, user["data"], decrypted_message["data"], "byte");
                 continue;
-            #decrypted_message = decrypted_message["data"];
+            elif decrypted_message["data"][:14] == b'VoCom Initiate':
+                client_dic_vocom[socket] = user;
+                socket_list_vocom.append(socket);
+                continue;
             print(f'Received message from {user["data"].decode("utf-8")}: [{str(decrypted_message["integrity"])}] {decrypted_message["data"]}'); #removed ["data"] for user
             if decrypted_message["integrity"]:
                 broadcast(socket, user["data"], decrypted_message["data"], "byte");
             else:
                 continue;
     for socket in exception_sockets:
-        (socket_list, client_dic) = close_connection(socket, socket_list, client_dic);
+        close_connection(socket, socket_list, socket_list_vocom, client_dic, client_dic_vocom);

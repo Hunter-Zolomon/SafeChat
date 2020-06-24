@@ -7,8 +7,8 @@ This program was created in order to demonstrate simple cryptography and socket 
 # Library Dependancies
 
   - PyCryptoDomex (Download Link: https://pypi.org/project/pycryptodomex/)
-  - Tqdm (Download Link: https://pypi.org/project/tqdm/)
-  - PyAudio (Download Link: https://pypi.org/project/PyAudio/)
+  - Rich (Download Link: https://pypi.org/project/rich/)
+  - Sounddevice (Download Link: https://pypi.org/project/sounddevice/)
   
 # Usage
 Run the server module on the appropriate machine:
@@ -24,7 +24,7 @@ You will be asked to enter the IP address of the interface, a static Port and a 
 2. Dynamic send/receive collision aversion.
 3. Data Integrity (Hash Check/HMAC)(Currently in Alpha).
 4. File sending capabilities(Currently in Alpha).
-5. VoIP(Currently in Alpha)
+5. VoIP(Currently in Development)
 6. VideoChat
 
 Note: Thanks to mjm918 for parts of the handshake protocol outline.
