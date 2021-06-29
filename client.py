@@ -8,11 +8,10 @@ from rich.progress import (
     Progress,
     TaskID,
 )
-from Cryptodome.Cipher import AES, PKCS1_OAEP;
+from Cryptodome.Cipher import ChaCha20_Poly1305, PKCS1_OAEP;
 from Cryptodome.PublicKey import RSA;
 from Cryptodome.Signature import pss;
-from Cryptodome.Util import Counter;
-from Cryptodome.Hash import HMAC, SHA512;
+from Cryptodome.Hash import SHA512;
 from Cryptodome import Random;
 import sounddevice as sd;
 import traceback;
@@ -40,7 +39,7 @@ class RT:
     MAGENTA = '\u001b[35m';
     CYAN = '\u001b[36m';
     WHITE = '\u001b[37m';
-    
+ 
     #Background
     BBLACK = '\u001b[40m';
     BRED = '\u001b[41m';
@@ -70,7 +69,7 @@ class VoCom:
         receive_thread = threading.Thread(target=self.receive_server_data).start();
         print(f"{RT.CYAN}Voice Stream Active{RT.RESET}");
         self.send_data_to_server();
-    
+ 
     def receive_server_data(self):
         while True:
             try:
@@ -161,7 +160,7 @@ def DownloadFile(socket, name, key, size_uncompressed, size_compressed, buffer=2
         if l[:8] == "SFTP END".encode('utf-8'):
             print(f"{RT.BLUE}SFTP END{RT.RESET}");
         else:
-            print(f"{RT.RED}SFTP Did Not End! Retry File Transfer.{RT.End}");
+            print(f"{RT.RED}SFTP Did Not End! Retry File Transfer.{RT.RESET}");
             return;
         split_data = l.split(CUSTOM_SEPARATOR);
         received_file_hash_uc = split_data[1].decode('utf-8');
@@ -181,27 +180,15 @@ def DownloadFile(socket, name, key, size_uncompressed, size_compressed, buffer=2
         else:
             print(f"{RT.RED}SFTP Checksum Did Not Match! File Is Corrupt{RT.RESET}");
 
-def HMACher(data, key, check_mode_var=""):
-    hmac = HMAC.new(key, data, SHA512);
-    if check_mode_var == "":
-        return hmac.hexdigest();
-    elif check_mode_var:
-        if hmac.hexdigest() == check_mode_var:
-            return True;
-        else:
-            return False;
+def ChaChaEncrypt(key, header, plaintext):
+    chacha = ChaCha20_Poly1305.new(key=key);
+    chacha.update(header);
+    return (chacha.encrypt_and_digest(plaintext), chacha.nonce);
 
-def AESEncrypt(key, plaintext):
-    IV = os.urandom(16);
-    ctr = Counter.new(128, initial_value=int.from_bytes(IV, byteorder='big'));
-    aes = AES.new(key, AES.MODE_CTR, counter=ctr);
-    return IV + aes.encrypt(plaintext);
-
-def AESDecrypt(key, ciphertext):
-    IV = ciphertext[:16];
-    ctr = Counter.new(128, initial_value=int.from_bytes(IV, byteorder='big'));
-    aes = AES.new(key, AES.MODE_CTR, counter=ctr);
-    return aes.decrypt(ciphertext[16:]);
+def ChaChaDecrypt(key, tag, header, ciphertext):
+    chacha = ChaCha20_Poly1305.new(key=key, nonce=ciphertext[:12]);
+    chacha.update(header);
+    return chacha.decrypt_and_verify(ciphertext[12:], tag);
 
 def send_message(client_socket, message, type="byte"):
     if type == "byte":
@@ -212,13 +199,9 @@ def send_message(client_socket, message, type="byte"):
         message_sender_header = f"{len(message_sender):<{HEADER_LENGTH}}".encode('utf-8');
         client_socket.send(message_sender_header + message_sender);
 
-def sendEncryptedMessage(client_socket, message, AESKey, Hash=True):
-    if Hash:    
-        hashed_message = HMACher(message, AESKey); 
-    else:
-        hashed_message = "";
-    message_encrypted = AESEncrypt(AESKey, message + CUSTOM_SEPARATOR + hashed_message.encode('utf-8'));
-    send_message(client_socket, message_encrypted, type="byte");
+def sendEncryptedMessage(client_socket, message, Chakey):
+    ((message_encrypted, message_tag), nonce) = ChaChaEncrypt(Chakey, b"header", message);
+    send_message(client_socket, nonce + message_encrypted + CUSTOM_SEPARATOR + message_tag, type="byte");
     #message_sender_header = f"{len(message_encrypted):<{HEADER_LENGTH}}".encode('utf-8');
     #client_socket.send(message_sender_header + message_encrypted);
 
@@ -264,17 +247,13 @@ def receive_message(client_socket):
         logfilehandle.write("receive_message(): " + str(e) + "\n");
         return False;
 
-def recieveEncryptedMessage(client_socket, AESKey):
+def recieveEncryptedMessage(client_socket, Chakey):
     try:
         whole_message = receive_message(client_socket);
-        decrypted_message = AESDecrypt(AESKey, whole_message["data"]);
-        split_decrypted_message = decrypted_message.split(CUSTOM_SEPARATOR);
-        plain_message = CUSTOM_SEPARATOR.join(split_decrypted_message[:-1]);
-        mac = split_decrypted_message[len(split_decrypted_message) - 1];
-        if HMACher(plain_message, AESKey, mac.decode('utf-8')):
-            return {'header': whole_message["header"], 'data': plain_message, 'integrity': True};
-        else:
-            return {'header': whole_message["header"], 'data': plain_message, 'integrity': False};
+        #decrypted_message = AESDecrypt(AESKey, whole_message["data"]);
+        message_split = whole_message["data"].split(CUSTOM_SEPARATOR);
+        decrypted_message = ChaChaDecrypt(Chakey, message_split[1], b"header", message_split[0]);
+        return {'header': whole_message["header"], 'data': decrypted_message, 'integrity': True};
     except Exception as e:
         logfilehandle.write("recieveEncryptedMessage(): " + str(e) + "\n");
         return False;
@@ -335,7 +314,7 @@ try:
     client_socket.connect((IP, Port));
     print(f"{RT.GREEN}Connected!{RT.RESET}");
     client_socket.setblocking(False);
-except BaseException:
+except BaseException as e:
     print(f"{RT.RED}Error Occured During Connection Phase!{RT.RESET}");
     logfilehandle.write("Socket Connection Error: " + str(e) + "\n");
     logfilehandle.close();
@@ -380,14 +359,14 @@ sess_hexdigest = sess.hexdigest();
 #hashObj = hashlib.sha512(serverPublic);
 hashObj = SHA512.new(serverPublic);
 server_public_hash = hashObj.hexdigest();
-print(f"{RT.YELLOW}Matching Server's Public Key & AES Key...{RT.RESET}");
+print(f"{RT.YELLOW}Matching Server's Public Key & ChaCha Key...{RT.RESET}");
 if server_public_hash == serverPublicHash.decode('utf-8') and sess_hexdigest == session_hexdigest.decode('utf-8'):
     print(f"{RT.BLUE}Sending Encrypted Session Key...{RT.RESET}");
     #(serverPublic, ) = RSA.importKey(serverPublic).encrypt(ttwoByte, None);
     intermediate = RSA.import_key(serverPublic);
     serverPublic = PKCS1_OAEP.new(intermediate).encrypt(ttwoByte);
     send_message(client_socket, serverPublic, "byte");
-    print(f"{RT.BLUE}Creating AES Key...{RT.RESET}");
+    print(f"{RT.BLUE}Creating ChaCha Key...{RT.RESET}");
     key_256 = ttwoByte;
     try:
         """while(True):
@@ -407,7 +386,9 @@ if server_public_hash == serverPublicHash.decode('utf-8') and sess_hexdigest == 
         logfilehandle.write("Handshake Error: " + str(e) + "\n");
         logfilehandle.close();
         exit(1);
-    ready_msg = AESDecrypt(key_256, ready["data"]);
+    #ready_msg = AESDecrypt(key_256, ready["data"]);
+    splitreceived = ready["data"].split(CUSTOM_SEPARATOR);
+    ready_msg = ChaChaDecrypt(key_256, splitreceived[1], b"header", splitreceived[0]);
     if ready_msg == "Ready".encode('utf-8'):
         print(f"{RT.GREEN}Client Is Ready To Communicate!{RT.RESET}");
     else:

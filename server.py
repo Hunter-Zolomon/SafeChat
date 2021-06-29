@@ -1,9 +1,8 @@
-from Cryptodome.Hash import HMAC, SHA512;
+from Cryptodome.Hash import SHA512;
 from Cryptodome.PublicKey import RSA
 from Cryptodome.Signature import pss;
 from Cryptodome import Random;
-from Cryptodome.Cipher import AES, PKCS1_OAEP;
-from Cryptodome.Util import Counter;
+from Cryptodome.Cipher import ChaCha20_Poly1305, PKCS1_OAEP;
 import socket;
 import select;
 import os;
@@ -11,11 +10,12 @@ import re;
 #import hashlib;
 
 CUSTOM_SEPARATOR = b':0x0:';
+CHACHA_HEADER = b"header";
 socket_list = [];
 socket_list_vocom = [];
 client_dic = {};
 client_dic_vocom = {};
-aes_client_mapping = {};
+chacha_client_mapping = {};
 
 class RT:
     #Text
@@ -40,27 +40,15 @@ class RT:
 
     RESET = '\u001b[0m';
 
-def HMACher(data, key, check_mode_var=""):
-    hmac = HMAC.new(key, data, SHA512);
-    if check_mode_var == "":
-        return hmac.hexdigest();
-    elif check_mode_var:
-        if hmac.hexdigest() == check_mode_var:
-            return True;
-        else:
-            return False;
+def ChaChaEncrypt(key, header, plaintext):
+    chacha = ChaCha20_Poly1305.new(key=key);
+    chacha.update(header);
+    return (chacha.encrypt_and_digest(plaintext), chacha.nonce);
 
-def AESEncrypt(key, plaintext):
-    IV = os.urandom(16);
-    ctr = Counter.new(128, initial_value=int.from_bytes(IV, byteorder='big'));
-    aes = AES.new(key, AES.MODE_CTR, counter=ctr);
-    return IV + aes.encrypt(plaintext);
-
-def AESDecrypt(key, ciphertext):
-    IV = ciphertext[:16];
-    ctr = Counter.new(128, initial_value=int.from_bytes(IV, byteorder='big'));
-    aes = AES.new(key, AES.MODE_CTR, counter=ctr);
-    return aes.decrypt(ciphertext[16:]);
+def ChaChaDecrypt(key, tag, header, ciphertext):
+    chacha = ChaCha20_Poly1305.new(key=key, nonce=ciphertext[:12]);
+    chacha.update(header);
+    return chacha.decrypt_and_verify(ciphertext[12:], tag);
 
 def send_message(client_socket, message, type="byte"):
     if type == "byte":
@@ -71,10 +59,9 @@ def send_message(client_socket, message, type="byte"):
         message_sender_header = f"{len(message_sender):<{HEADER_LENGTH}}".encode('utf-8');
         client_socket.send(message_sender_header + message_sender);
 
-def sendEncryptedMessage(client_socket, message, AESKey):
-    hashed_message = HMACher(message, AESKey);
-    message_encrypted = AESEncrypt(AESKey, message + CUSTOM_SEPARATOR + hashed_message);
-    send_message(client_socket, message_encrypted, type="byte");
+def sendEncryptedMessage(client_socket, message, Chakey):
+    ((message_encrypted, message_tag), nonce) = ChaChaEncrypt(Chakey, CHACHA_HEADER, message);
+    send_message(client_socket, nonce + message_encrypted + CUSTOM_SEPARATOR + message_tag, type="byte");
     #message_sender_header = f"{len(message_encrypted):<{HEADER_LENGTH}}".encode('utf-8');
     #client_socket.send(message_sender_header + message_encrypted);
 
@@ -105,20 +92,13 @@ def receive_message(client_socket):
         print(e);
         return False;
 
-def recieveEncryptedMessage(client_socket, AESKey, passthrough=False):
+def recieveEncryptedMessage(client_socket, Chakey, passthrough=False):
     try:
         whole_message = receive_message(client_socket);
-        decrypted_message = AESDecrypt(AESKey, whole_message["data"]);
-        split_decrypted_message = decrypted_message.split(CUSTOM_SEPARATOR);
-        plain_message = CUSTOM_SEPARATOR.join(split_decrypted_message[:-1]);
-        mac = split_decrypted_message[len(split_decrypted_message) - 1];
-        if passthrough:
-            return {'header': whole_message["header"], 'data': plain_message, 'integrity': True};
-        #if mac == Hasher(decrypted_message[:len(decrypted_message)-69], key_256):
-        if HMACher(plain_message, AESKey, mac.decode('utf-8')):
-            return {'header': whole_message["header"], 'data': plain_message, 'integrity': True};
-        else:
-            return {'header': whole_message["header"], 'data': plain_message, 'integrity': False};
+        #decrypted_message = AESDecrypt(AESKey, whole_message["data"]);
+        message_split = whole_message["data"].split(CUSTOM_SEPARATOR);
+        decrypted_message = ChaChaDecrypt(Chakey, message_split[1], CHACHA_HEADER, message_split[0]);
+        return {'header': whole_message["header"], 'data': decrypted_message, 'integrity': True};
     except Exception as e:
         print(e);
         return False;
@@ -128,11 +108,13 @@ def broadcast(client_socket, user, message, type="byte", socket_array=socket_lis
         if socket != server_socket and socket != client_socket:
             try:
                 username_header = f"{len(user):<{HEADER_LENGTH}}".encode('utf-8');
-                user_socket_key = aes_client_mapping[socket];
-                message_hash = HMACher(message, user_socket_key);
-                enc_message = AESEncrypt(user_socket_key, message + CUSTOM_SEPARATOR + message_hash.encode('utf-8'));
-                enc_message_header = f"{len(enc_message):<{HEADER_LENGTH}}".encode('utf-8');
-                socket.send(username_header + user + enc_message_header + enc_message);
+                user_socket_key = chacha_client_mapping[socket];
+                #message_hash = HMACher(message, user_socket_key);
+                #enc_message = AESEncrypt(user_socket_key, message + CUSTOM_SEPARATOR + message_hash.encode('utf-8'));
+                ((enc_messge, msg_tag), msg_nonce) = ChaChaEncrypt(user_socket_key, CHACHA_HEADER, message);
+                message_combined = msg_nonce + enc_messge + CUSTOM_SEPARATOR + msg_tag;
+                enc_message_header = f"{len(message_combined):<{HEADER_LENGTH}}".encode('utf-8');
+                socket.send(username_header + user + enc_message_header + message_combined);
             except:
                 socket.close();
                 socket_list.remove(socket);
@@ -149,7 +131,7 @@ def close_connection(socket, sock_list, sock_list_vocom, client_dictionary, clie
         if socket in socket_list_vocom: sock_list_vocom.remove(socket);
         if socket in client_dictionary: del client_dictionary[socket];
         if socket in client_dictionary_vocom: del client_dictionary_vocom[socket];
-        if socket in aes_client_mapping: del aes_client_mapping[socket];
+        if socket in chacha_client_mapping: del chacha_client_mapping[socket];
         return [sock_list, sock_list_vocom, client_dictionary, client_dictionary_vocom];
     else:
         print("Closed connection from: UNKNOWN");
@@ -262,7 +244,7 @@ while(True):
                 #session = hashlib.sha512(ttwoByte);
                 session = SHA512.new(ttwoByte);
                 session_hexdigest = session.hexdigest();
-                aes_client_mapping[client_socket] = ttwoByte;
+                chacha_client_mapping[client_socket] = ttwoByte;
                 #fSend = ttwoByte + ":0x0:".encode('utf-8') + session_hexdigest.encode('utf-8') + ":0x0:".encode('utf-8') + public_hash_hexdigest.encode('utf-8');
                 fSend = ttwoByte + CUSTOM_SEPARATOR + session_hexdigest.encode('utf-8') + CUSTOM_SEPARATOR + public_hash_hexdigest.encode('utf-8');
                 #TTwoByte, Session Hash, and Public Hash Debug
@@ -292,10 +274,12 @@ while(True):
                     clientPH_other = PKCS1_OAEP.new(intermediate).decrypt(clientPH["data"]);
                     print(f"{RT.BLUE}Matching Session Key...{RT.RESET}");
                     if clientPH_other == ttwoByte:
-                        print(f"{RT.BLUE}Creating AES Key...{RT.RESET}");
+                        print(f"{RT.BLUE}Creating ChaCha Key...{RT.RESET}");
                         key_256 = ttwoByte;
-                        client_msg = AESEncrypt(key_256, "Ready".encode('utf-8'));
-                        send_message(client_socket, client_msg, "byte");
+                        #client_msg = AESEncrypt(key_256, "Ready".encode('utf-8'));
+                        ((client_msg, tag), nonce) = ChaChaEncrypt(key_256, CHACHA_HEADER, "Ready".encode('utf-8'));
+                        #send_message(client_socket, client_msg, "byte");
+                        send_message(client_socket, nonce + client_msg + CUSTOM_SEPARATOR + tag, "byte");
                         print(f"{RT.BLUE}Waiting For Client's Username...{RT.RESET}");
                         user = recieveEncryptedMessage(client_socket, key_256);
                         if user is False:
@@ -319,7 +303,7 @@ while(True):
                 continue;
         else:
             user = client_dic[socket];
-            user_key = aes_client_mapping[socket];
+            user_key = chacha_client_mapping[socket];
             if socket in client_dic_vocom:
                 decrypted_message = recieveEncryptedMessage(socket, user_key, True);
                 if decrypted_message is False:
