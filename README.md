@@ -1,6 +1,6 @@
 # SafeChat
 
-SafeChat is a TCP/IP socket chat program with RSA handshake protocol, AES symmetric encryption, and SHA512 hashing. It supports multi client encryption and communication.
+SafeChat is a TCP/IP socket chat program with RSA handshake protocol, ChaCha20_Poly1305 symmetric encryption & verification (End-To-End), and separate SHA512 hashing. It supports multi client encryption and communication.
 
 This program was created purely for the demonstration of simple cryptography and socket programming concepts. It is not intended for commercial use!
 
