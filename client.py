@@ -27,6 +27,8 @@ import time;
 import re;
 
 CUSTOM_SEPARATOR = b':0x0:';
+CHACHA_HEADER = b"header";
+HEADER_LENGTH = 10;
 logfilehandle = open("client_log.txt", "w");
 
 class RT:
@@ -157,7 +159,7 @@ def DownloadFile(socket, name, key, size_uncompressed, size_compressed, buffer=2
                 file_hash.update(l);
         user_data = receive_message(socket);
         l = recieveEncryptedMessage(socket, key)["data"];
-        if l[:8] == "SFTP END".encode('utf-8'):
+        if l[:8] == encode("SFTP END"):
             print(f"{RT.BLUE}SFTP END{RT.RESET}");
         else:
             print(f"{RT.RED}SFTP Did Not End! Retry File Transfer.{RT.RESET}");
@@ -192,18 +194,16 @@ def ChaChaDecrypt(key, tag, header, ciphertext):
 
 def send_message(client_socket, message, type="byte"):
     if type == "byte":
-        message_header = f"{len(message):<{HEADER_LENGTH}}".encode('utf-8');
+        message_header = encode(f"{len(message):<{HEADER_LENGTH}}");
         client_socket.send(message_header + message);
     elif type == "string":
-        message_sender = message.encode('utf-8');
-        message_sender_header = f"{len(message_sender):<{HEADER_LENGTH}}".encode('utf-8');
+        message_sender = encode(message);
+        message_sender_header = encode(f"{len(message_sender):<{HEADER_LENGTH}}");
         client_socket.send(message_sender_header + message_sender);
 
 def sendEncryptedMessage(client_socket, message, Chakey):
-    ((message_encrypted, message_tag), nonce) = ChaChaEncrypt(Chakey, b"header", message);
+    ((message_encrypted, message_tag), nonce) = ChaChaEncrypt(Chakey, CHACHA_HEADER, message);
     send_message(client_socket, nonce + message_encrypted + CUSTOM_SEPARATOR + message_tag, type="byte");
-    #message_sender_header = f"{len(message_encrypted):<{HEADER_LENGTH}}".encode('utf-8');
-    #client_socket.send(message_sender_header + message_encrypted);
 
 def recv_exact(socket, size):
     buflist = [];
@@ -226,13 +226,11 @@ def recv_exact(socket, size):
 
 def receive_message(client_socket):
     try:
-        #message_header = client_socket.recv(HEADER_LENGTH);
         message_header = recv_exact(client_socket, HEADER_LENGTH);
         if not len(message_header):
             logfilehandle.write("receive_message(): Failed prematurely\n");
             return False;
         message_length = int(message_header.decode('utf-8').strip());
-        #return {'header': message_header, 'data': client_socket.recv(message_length)};
         return {'header': message_header, 'data': recv_exact(client_socket, message_length)};
     except IOError as e:
         if e.errno != errno.EAGAIN and e.errno != errno.EWOULDBLOCK:
@@ -250,13 +248,17 @@ def receive_message(client_socket):
 def recieveEncryptedMessage(client_socket, Chakey):
     try:
         whole_message = receive_message(client_socket);
-        #decrypted_message = AESDecrypt(AESKey, whole_message["data"]);
         message_split = whole_message["data"].split(CUSTOM_SEPARATOR);
-        decrypted_message = ChaChaDecrypt(Chakey, message_split[1], b"header", message_split[0]);
+        decrypted_message = ChaChaDecrypt(Chakey, message_split[1], CHACHA_HEADER, message_split[0]);
         return {'header': whole_message["header"], 'data': decrypted_message, 'integrity': True};
+    except ValueError as ve:
+        return {'header': whole_message["header"], 'data': decrypted_message, 'integrity': False};
     except Exception as e:
         logfilehandle.write("recieveEncryptedMessage(): " + str(e) + "\n");
         return False;
+
+def encode(richstring):
+    return richstring.encode('utf-8');
 
 def checkIP(ip):
     regex = '''^(25[0-5]|2[0-4][0-9]|[0-1]?[0-9][0-9]?)\.( 
@@ -278,27 +280,16 @@ def prompt(specialmessage=""):
     sys.stdout.write("<You> %s" %specialmessage);
     sys.stdout.flush();
 
-HEADER_LENGTH = 10;
-
 key_256 = b'';
 random_generator = Random.new();
 RSAKey = RSA.generate(4096, random_generator.read);
 public = RSAKey.publickey().exportKey('DER');
 private = RSAKey.exportKey('DER');
-#public_hash = hashlib.sha512(public);
 public_hash = SHA512.new(public);
 public_hash_hexdigest = public_hash.hexdigest();
-
-first_exchange_msg = public + CUSTOM_SEPARATOR + public_hash_hexdigest.encode('utf-8');
+first_exchange_msg = public + CUSTOM_SEPARATOR + encode(public_hash_hexdigest);
 first_exchange_msg_hashobj = SHA512.new(first_exchange_msg);
 signature = pss.new(RSAKey).sign(first_exchange_msg_hashobj);
-
-#User's Public Key Debug
-#print("Your Public Key: %s" %public); 
-#User's Private Key Debug
-#print("Your Private Key: %s" %private); 
-#User's Public Hash Debug
-#print("Your Public SHA512 Hash: %s" %public_hash_hexdigest); 
 
 IP = str(input("Enter Server IP Address: "));
 while(checkIP(IP) == False):
@@ -322,59 +313,37 @@ except BaseException as e:
 
 send_message(client_socket, first_exchange_msg + CUSTOM_SEPARATOR + signature, "byte");
 
-"""while(True):
-    fGet = receive_message(client_socket);
-    if fGet == False:
-        continue;
-    else:
-        break;"""
 while(True):
     try:
         fGet = receive_message(client_socket);
     except:
         continue;
     break;
-split = fGet["data"].split("(:0x0:)".encode('utf-8'));
-toDecrypt = ''.encode('utf-8');
+split = fGet["data"].split(encode("(:0x0:)"));
+toDecrypt = encode('');
 for i in range(0, len(split) - 1):
     toDecrypt += split[i];
 serverPublic = split[len(split) - 1];
-#Server's Public Key Debug
-#print("Server's Public Key: %s" %serverPublic);
-#Obsolete RSA Import Key
-#decrypted = RSA.importKey(private).decrypt(toDecrypt);
 intermediate = RSA.import_key(private);
 decrypted = PKCS1_OAEP.new(intermediate).decrypt(toDecrypt);
-#splittedDecrypt = decrypted.split(":0x0:".encode('utf-8'));
 splittedDecrypt = decrypted.split(CUSTOM_SEPARATOR);
 ttwoByte = splittedDecrypt[0];
 session_hexdigest = splittedDecrypt[1];
 serverPublicHash = splittedDecrypt[2];
-#User's AES Key Hash Debug
-#print("Client's AES Key In Hash: %s" %session_hexdigest);
-
-#sess = hashlib.sha512(ttwoByte);
 sess = SHA512.new(ttwoByte);
 sess_hexdigest = sess.hexdigest();
-#hashObj = hashlib.sha512(serverPublic);
 hashObj = SHA512.new(serverPublic);
 server_public_hash = hashObj.hexdigest();
+
 print(f"{RT.YELLOW}Matching Server's Public Key & ChaCha Key...{RT.RESET}");
 if server_public_hash == serverPublicHash.decode('utf-8') and sess_hexdigest == session_hexdigest.decode('utf-8'):
     print(f"{RT.BLUE}Sending Encrypted Session Key...{RT.RESET}");
-    #(serverPublic, ) = RSA.importKey(serverPublic).encrypt(ttwoByte, None);
     intermediate = RSA.import_key(serverPublic);
     serverPublic = PKCS1_OAEP.new(intermediate).encrypt(ttwoByte);
     send_message(client_socket, serverPublic, "byte");
     print(f"{RT.BLUE}Creating ChaCha Key...{RT.RESET}");
     key_256 = ttwoByte;
     try:
-        """while(True):
-            ready = receive_message(client_socket);
-            if ready == False:
-                continue;
-            else:
-                break;"""
         while(True):
             try:
                 ready = receive_message(client_socket);
@@ -386,19 +355,16 @@ if server_public_hash == serverPublicHash.decode('utf-8') and sess_hexdigest == 
         logfilehandle.write("Handshake Error: " + str(e) + "\n");
         logfilehandle.close();
         exit(1);
-    #ready_msg = AESDecrypt(key_256, ready["data"]);
     splitreceived = ready["data"].split(CUSTOM_SEPARATOR);
-    ready_msg = ChaChaDecrypt(key_256, splitreceived[1], b"header", splitreceived[0]);
-    if ready_msg == "Ready".encode('utf-8'):
+    ready_msg = ChaChaDecrypt(key_256, splitreceived[1], CHACHA_HEADER, splitreceived[0]);
+    if ready_msg == encode("Ready"):
         print(f"{RT.GREEN}Client Is Ready To Communicate!{RT.RESET}");
     else:
         print(f"{RT.RED}Server's Public || Session Key Doesn't Match. Shutting Down Socket!{RT.RESET}");
         client_socket.close();
         exit(1);
 
-sendEncryptedMessage(client_socket, user_username.encode('utf-8'), key_256);
-#User's Username Hash(HMAC) Debug
-#print(HMACher(user_username.encode('utf-8'), key_256));
+sendEncryptedMessage(client_socket, encode(user_username), key_256);
 
 prompt();
 
@@ -412,34 +378,29 @@ def sender_function(sock):
         if message:
             if message == "?:0x0VoCom\n":
                 procedure_lock.clear();
-                sendEncryptedMessage(sock, "VoCom Initiate".encode('utf-8'), key_256);
+                sendEncryptedMessage(sock, encode("VoCom Initiate"), key_256);
                 VoiceCommunication_obj = VoCom(sock, key_256, read_chunk=5120);
             elif message[:12] == "?:0x0SFTPcmd":
                 procedure_lock.clear();
                 addresses = message.split(",");
-                #address = message[16:].strip();
                 filesize_uc = 0;
                 addresses_string = "";
                 for i in range(1, len(addresses)):
                     addresses[i] = addresses[i].strip();
                     filesize_uc += os.path.getsize(addresses[i]);
                     addresses_string += addresses[i] + ",";
-                #filesize_uc = os.path.getsize(address);
                 FileCompressor("temp.tar.gz", addresses[1:]);
-                #FileCompressor("temp.tar.gz", [address]);
                 filesize_c = os.path.getsize("temp.tar.gz");
-                ftp_flag = ("SFTP Initiate" + ":0x0:" + addresses_string + ":0x0:" + str(filesize_uc) + ":0x0:" + str(filesize_c)).encode('utf-8');
-                #ftp_flag = ("SFTP Initiate" + ":0x0:" + address + ":0x0:" + str(filesize_uc) + ":0x0:" + str(filesize_c)).encode('utf-8');
+                ftp_flag = encode("SFTP Initiate") + CUSTOM_SEPARATOR + encode(addresses_string) + CUSTOM_SEPARATOR + encode(str(filesize_uc)) + CUSTOM_SEPARATOR + encode(str(filesize_c));
                 sendEncryptedMessage(sock, ftp_flag, key_256);
                 file_hash = UploadFile(sock, addresses[1:], key_256, filesize_uc, filesize_c, 16384);
-                #file_hash = UploadFile(sock, address, key_256, filesize_uc, filesize_c, 16384);
-                sendEncryptedMessage(sock, ("SFTP END" + ":0x0:" + file_hash[0].hexdigest() + ":0x0:" + file_hash[1].hexdigest()).encode('utf-8'), key_256);
+                sendEncryptedMessage(sock, encode("SFTP END") + CUSTOM_SEPARATOR + encode(file_hash[0].hexdigest()) + CUSTOM_SEPARATOR + encode(file_hash[1].hexdigest()), key_256);
                 os.remove("temp.tar.gz");
                 print("");
                 prompt();
                 procedure_lock.set();
             else:
-                message = message.encode('utf-8');
+                message = encode(message);
                 sendEncryptedMessage(sock, message, key_256);
                 prompt();
 
@@ -456,14 +417,12 @@ def receiver_function(sock):
             rusername = user_data["data"];
             decrypted_message_package = recieveEncryptedMessage(sock, key_256);
             decrypted_message = decrypted_message_package["data"];
-            #split_decrypted_message = decrypted_message.split(":0x0:".encode('utf-8'));
             split_decrypted_message = decrypted_message.split(CUSTOM_SEPARATOR);
-            if split_decrypted_message[0] == "SFTP Initiate".encode('utf-8'):
+            if split_decrypted_message[0] == encode("SFTP Initiate"):
                 procedure_lock.clear();
                 print("Incoming File(s)....");
                 dfilename_split = split_decrypted_message[1].decode('utf-8').strip().split(",");
                 dfilename = dfilename_split[:len(dfilename_split) - 1];
-                #dfilename = split_decrypted_message[1].decode('utf-8').strip();
                 filesize_uc = split_decrypted_message[2];
                 filesize_c = split_decrypted_message[3];
                 DownloadFile(sock, dfilename, key_256, int(filesize_uc), int(filesize_c), 16384);

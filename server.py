@@ -7,10 +7,10 @@ import socket;
 import select;
 import os;
 import re;
-#import hashlib;
 
 CUSTOM_SEPARATOR = b':0x0:';
 CHACHA_HEADER = b"header";
+HEADER_LENGTH = 10;
 socket_list = [];
 socket_list_vocom = [];
 client_dic = {};
@@ -52,18 +52,16 @@ def ChaChaDecrypt(key, tag, header, ciphertext):
 
 def send_message(client_socket, message, type="byte"):
     if type == "byte":
-        message_header = f"{len(message):<{HEADER_LENGTH}}".encode('utf-8');
+        message_header = encode(f"{len(message):<{HEADER_LENGTH}}");
         client_socket.send(message_header + message);
     elif type == "string":
-        message_sender = message.encode('utf-8');
-        message_sender_header = f"{len(message_sender):<{HEADER_LENGTH}}".encode('utf-8');
+        message_sender = encode(message);
+        message_sender_header = encode(f"{len(message_sender):<{HEADER_LENGTH}}");
         client_socket.send(message_sender_header + message_sender);
 
 def sendEncryptedMessage(client_socket, message, Chakey):
     ((message_encrypted, message_tag), nonce) = ChaChaEncrypt(Chakey, CHACHA_HEADER, message);
     send_message(client_socket, nonce + message_encrypted + CUSTOM_SEPARATOR + message_tag, type="byte");
-    #message_sender_header = f"{len(message_encrypted):<{HEADER_LENGTH}}".encode('utf-8');
-    #client_socket.send(message_sender_header + message_encrypted);
 
 def recv_exact(socket, size):
     buflist = [];
@@ -77,7 +75,6 @@ def recv_exact(socket, size):
 
 def receive_message(client_socket):
     try:
-        #message_header = client_socket.recv(HEADER_LENGTH);
         message_header = recv_exact(client_socket, HEADER_LENGTH);
         if not len(message_header):
             return False;
@@ -85,7 +82,6 @@ def receive_message(client_socket):
             message_length = int(message_header.decode('utf-8').strip());
         except Exception as e:
             print("Int conversion failed. Probably recv overflow: " + str(e));
-        #return {'header': message_header, 'data': client_socket.recv(message_length)};
         return {'header': message_header, 'data': recv_exact(client_socket, message_length)};
         pass;
     except Exception as e:
@@ -95,10 +91,11 @@ def receive_message(client_socket):
 def recieveEncryptedMessage(client_socket, Chakey, passthrough=False):
     try:
         whole_message = receive_message(client_socket);
-        #decrypted_message = AESDecrypt(AESKey, whole_message["data"]);
         message_split = whole_message["data"].split(CUSTOM_SEPARATOR);
         decrypted_message = ChaChaDecrypt(Chakey, message_split[1], CHACHA_HEADER, message_split[0]);
         return {'header': whole_message["header"], 'data': decrypted_message, 'integrity': True};
+    except ValueError as ve:
+        return {'header': whole_message["header"], 'data': decrypted_message, 'integrity': False}; 
     except Exception as e:
         print(e);
         return False;
@@ -107,13 +104,11 @@ def broadcast(client_socket, user, message, type="byte", socket_array=socket_lis
     for socket in socket_array:
         if socket != server_socket and socket != client_socket:
             try:
-                username_header = f"{len(user):<{HEADER_LENGTH}}".encode('utf-8');
+                username_header = encode(f"{len(user):<{HEADER_LENGTH}}");
                 user_socket_key = chacha_client_mapping[socket];
-                #message_hash = HMACher(message, user_socket_key);
-                #enc_message = AESEncrypt(user_socket_key, message + CUSTOM_SEPARATOR + message_hash.encode('utf-8'));
                 ((enc_messge, msg_tag), msg_nonce) = ChaChaEncrypt(user_socket_key, CHACHA_HEADER, message);
                 message_combined = msg_nonce + enc_messge + CUSTOM_SEPARATOR + msg_tag;
-                enc_message_header = f"{len(message_combined):<{HEADER_LENGTH}}".encode('utf-8');
+                enc_message_header = encode(f"{len(message_combined):<{HEADER_LENGTH}}");
                 socket.send(username_header + user + enc_message_header + message_combined);
             except:
                 socket.close();
@@ -124,8 +119,8 @@ def close_connection(socket, sock_list, sock_list_vocom, client_dictionary, clie
         user = client_dictionary[socket]["data"];
         print("Closed connection from: {}".format(user.decode('utf-8')));
         literal = f"[{user.decode('utf-8')}] Has Left The Chat";
-        literal = literal.encode('utf-8');
-        literal_header = f"{len(literal):<{HEADER_LENGTH}}".encode('utf-8');
+        literal = encode(literal);
+        literal_header = encode(f"{len(literal):<{HEADER_LENGTH}}");
         broadcast(socket, user, literal, type="byte");
         if socket in sock_list: sock_list.remove(socket);
         if socket in socket_list_vocom: sock_list_vocom.remove(socket);
@@ -139,6 +134,8 @@ def close_connection(socket, sock_list, sock_list_vocom, client_dictionary, clie
         if socket in socket_list_vocom: sock_list_vocom.remove(socket);
         return [sock_list, sock_list_vocom, client_dictionary, client_dictionary_vocom];
     
+def encode(richstring):
+    return richstring.encode('utf-8');
 
 def checkIP(ip):
     regex = '''^(25[0-5]|2[0-4][0-9]|[0-1]?[0-9][0-9]?)\.( 
@@ -156,23 +153,13 @@ def checkPort(port):
     else:
         return False;
 
-HEADER_LENGTH = 10;
-
-#hasher = hashlib.sha512();
 hasher = SHA512.new();
-
 random_generator = Random.new();
 RSAkey = RSA.generate(4096, random_generator.read);
 public = RSAkey.publickey().exportKey('DER');
 private = RSAkey.exportKey('DER');
-#public_hash = hashlib.sha512(public);
 public_hash = SHA512.new(public);
 public_hash_hexdigest = public_hash.hexdigest();
-
-#Server's Public Key Debug
-#print("Server Public Key: %s" %public);
-#Server's Private Key Debug
-#print("Server Private Key: %s" %private);
 
 IP = str(input("Enter Server IP Address: "));
 while(checkIP(IP) == False):
@@ -207,20 +194,12 @@ while(True):
             client_socket, client_address = server_socket.accept();
             print(f"{RT.YELLOW}A Client Is Trying To Connect...{RT.RESET}");
             handshake_data = receive_message(client_socket);
-            #split = handshake_data["data"].decode('utf-8').split(":");
             split = handshake_data["data"].split(CUSTOM_SEPARATOR);
             tmpClientPublic = split[0];
             clientPublicHash = split[1];
             clientSignature = split[2];
-            #Connecting Client's Public Key Debug
-            #print("Anonymous Client's Public Key: {}".format(tmpClientPublic));
-
-            #tmpClientPublic = tmpClientPublic.replace("\r\n", '');
             tmpClientPublic = tmpClientPublic.replace(b'\r\n', b'');
-            #clientPublicHash = clientPublicHash.replace("\r\n", '');
             clientPublicHash = clientPublicHash.replace(b"\r\n", b'');
-            #tmpHashObject = hashlib.sha512(tmpClientPublic.encode('utf-8'));
-            #tmpHashObject = SHA512.new(tmpClientPublic.encode('utf-8')); 
             tmpHashObject = SHA512.new(tmpClientPublic); 
             tmphash = tmpHashObject.hexdigest();
 
@@ -238,22 +217,12 @@ while(True):
                     continue;
                 pkclient = PKCS1_OAEP.new(clientPublic);
                 ttwoByte = os.urandom(32);
-                #Connecting Client's TTwoByte Debug
-                #print("Client Server Map TTWoByte: %s" %ttwoByte);
-
-                #session = hashlib.sha512(ttwoByte);
                 session = SHA512.new(ttwoByte);
                 session_hexdigest = session.hexdigest();
                 chacha_client_mapping[client_socket] = ttwoByte;
-                #fSend = ttwoByte + ":0x0:".encode('utf-8') + session_hexdigest.encode('utf-8') + ":0x0:".encode('utf-8') + public_hash_hexdigest.encode('utf-8');
-                fSend = ttwoByte + CUSTOM_SEPARATOR + session_hexdigest.encode('utf-8') + CUSTOM_SEPARATOR + public_hash_hexdigest.encode('utf-8');
-                #TTwoByte, Session Hash, and Public Hash Debug
-                #print(fSend);
-                #(fSend, ) = clientPublic.encrypt(fSend, None);
+                fSend = ttwoByte + CUSTOM_SEPARATOR + encode(session_hexdigest) + CUSTOM_SEPARATOR + encode(public_hash_hexdigest);
                 fSend = pkclient.encrypt(fSend);
-                temp = fSend + "(:0x0:)".encode('utf-8') + public;
-                #TTwoByte, Session Hash, Public Hash, and Public Key Debug
-                #print(temp);
+                temp = fSend + encode("(:0x0:)") + public;
                 try:
                     send_message(client_socket, temp, "byte");
                 except Exception as e:
@@ -268,17 +237,14 @@ while(True):
                     else:
                         break;
                 
-                if clientPH["data"] != "".encode('utf-8'):
-                    #clientPH_other = RSA.importKey(private).decrypt(clientPH["data"]);
+                if clientPH["data"] != encode(""):
                     intermediate = RSA.import_key(private);
                     clientPH_other = PKCS1_OAEP.new(intermediate).decrypt(clientPH["data"]);
                     print(f"{RT.BLUE}Matching Session Key...{RT.RESET}");
                     if clientPH_other == ttwoByte:
                         print(f"{RT.BLUE}Creating ChaCha Key...{RT.RESET}");
                         key_256 = ttwoByte;
-                        #client_msg = AESEncrypt(key_256, "Ready".encode('utf-8'));
-                        ((client_msg, tag), nonce) = ChaChaEncrypt(key_256, CHACHA_HEADER, "Ready".encode('utf-8'));
-                        #send_message(client_socket, client_msg, "byte");
+                        ((client_msg, tag), nonce) = ChaChaEncrypt(key_256, CHACHA_HEADER, encode("Ready"));
                         send_message(client_socket, nonce + client_msg + CUSTOM_SEPARATOR + tag, "byte");
                         print(f"{RT.BLUE}Waiting For Client's Username...{RT.RESET}");
                         user = recieveEncryptedMessage(client_socket, key_256);
@@ -290,8 +256,8 @@ while(True):
                         client_dic[client_socket] = user;
                         print("Accepted new connection from {}:{}, Username: {}".format(*client_address, user['data'].decode('utf-8')));
                         literal = f"[{client_address[0]}:{client_address[1]}] Has Entered The Chat";
-                        literal = literal.encode('utf-8');
-                        literal_header = f"{len(literal):<{HEADER_LENGTH}}".encode('utf-8');
+                        literal = encode(literal);
+                        literal_header = encode(f"{len(literal):<{HEADER_LENGTH}}");
                         broadcast(client_socket, user["data"], literal, type="byte");
                     else:
                         print(f"{RT.RED}Session Key From Client Does Not Match!{RT.RESET}");
@@ -319,7 +285,7 @@ while(True):
                 print(f'Received message from {user["data"].decode("utf-8")}: [{str(decrypted_message["integrity"])}] {decrypted_message["data"]}'); #removed ["data"] for user
                 broadcast(socket, user["data"], decrypted_message["data"], "byte");
                 decrypted_message = recieveEncryptedMessage(socket, user_key, True);
-                while not (decrypted_message["data"][:8] == 'SFTP END'.encode('utf-8')):
+                while not (decrypted_message["data"][:8] == encode('SFTP END')):
                     broadcast(socket, user["data"], decrypted_message["data"], "byte");
                     decrypted_message = recieveEncryptedMessage(socket, user_key, True);
                 print(f'Received message from {user["data"].decode("utf-8")}: [{str(decrypted_message["integrity"])}] {decrypted_message["data"]}'); #removed ["data"] for user
