@@ -29,7 +29,7 @@ import re;
 CUSTOM_SEPARATOR = b':0x0:';
 CHACHA_HEADER = b"header";
 HEADER_LENGTH = 10;
-logfilehandle = open("client_log.txt", "w");
+log_file_handle = open("client_log.txt", "w");
 
 class RT:
     #Text
@@ -76,7 +76,7 @@ class VoCom:
         while True:
             try:
                 user_data = receive_message(self._socket);
-                message_stream = recieveEncryptedMessage(self._socket, self._key)["data"];
+                message_stream = receiveEncryptedMessage(self._socket, self._key)["data"];
                 self.playing_stream.write(message_stream);
             except Exception as e:
                 pass;
@@ -153,12 +153,12 @@ def DownloadFile(socket, name, key, size_uncompressed, size_compressed, buffer=2
             while not progress.finished:
                 select.select([client_socket], [], []);
                 user_data = receive_message(socket);
-                l = recieveEncryptedMessage(socket, key)["data"];
+                l = receiveEncryptedMessage(socket, key)["data"];
                 f.write(l);
                 progress.update(task, advance=len(l));
                 file_hash.update(l);
         user_data = receive_message(socket);
-        l = recieveEncryptedMessage(socket, key)["data"];
+        l = receiveEncryptedMessage(socket, key)["data"];
         if l[:8] == encode("SFTP END"):
             print(f"{RT.BLUE}SFTP END{RT.RESET}");
         else:
@@ -169,15 +169,15 @@ def DownloadFile(socket, name, key, size_uncompressed, size_compressed, buffer=2
         received_file_hash_c = split_data[2].decode('utf-8');
         if received_file_hash_c == file_hash.hexdigest():
             FileDecompressor("temp.tar.gz", name);
-            ucfilehash = SHA512.new();
+            uc_file_hash = SHA512.new();
             for name_singular in name:
                 with open(name_singular, "rb") as filehandle:
                     while True:
                         block = filehandle.read(buffer);
                         if not block:
                             break;
-                        ucfilehash.update(block);
-        if received_file_hash_c == file_hash.hexdigest() and received_file_hash_uc == ucfilehash.hexdigest():
+                        uc_file_hash.update(block);
+        if received_file_hash_c == file_hash.hexdigest() and received_file_hash_uc == uc_file_hash.hexdigest():
             print(f"{RT.GREEN}SFTP Checksum Matched!{RT.RESET}");
         else:
             print(f"{RT.RED}SFTP Checksum Did Not Match! File Is Corrupt{RT.RESET}");
@@ -206,7 +206,7 @@ def sendEncryptedMessage(client_socket, message, Chakey):
     send_message(client_socket, nonce + message_encrypted + CUSTOM_SEPARATOR + message_tag, type="byte");
 
 def recv_exact(socket, size):
-    buflist = [];
+    buf_list = [];
     while size:
         while(True):
             try:
@@ -218,34 +218,35 @@ def recv_exact(socket, size):
                 else:
                     continue;
         if not buf:
-            logfilehandle.write("recv_exact(): Failed prematurely\n");
+            log_file_handle.write("recv_exact(): Failed prematurely\n");
             return False;
-        buflist.append(buf);
+        buf_list.append(buf);
         size -= len(buf);
-    return b''.join(buflist);
+    return b''.join(buf_list);
 
 def receive_message(client_socket):
     try:
         message_header = recv_exact(client_socket, HEADER_LENGTH);
         if not len(message_header):
-            logfilehandle.write("receive_message(): Failed prematurely\n");
+            log_file_handle.write("receive_message(): Failed prematurely\n");
             return False;
         message_length = int(message_header.decode('utf-8').strip());
         return {'header': message_header, 'data': recv_exact(client_socket, message_length)};
     except IOError as e:
         if e.errno != errno.EAGAIN and e.errno != errno.EWOULDBLOCK:
             print("Reading error: {}".format(str(e)));
-            logfilehandle.write("receive_message(): " + str(e) + "\n");
-            logfilehandle.close();
+            log_file_handle.write("receive_message(): " + str(e) + "\n");
+            log_file_handle.close();
             sys.exit();
         else:
-            logfilehandle.write("Stack: " + traceback.format_exc() + "\n");
+            log_file_handle.write("Stack: " + traceback.format_exc() + "\n");
             raise;
     except Exception as e:
-        logfilehandle.write("receive_message(): " + str(e) + "\n");
+        log_file_handle.write("receive_message(): " + str(e) + "\n");
         return False;
 
-def recieveEncryptedMessage(client_socket, Chakey):
+def receiveEncryptedMessage(client_socket, Chakey):
+    decrypted_message = '';
     try:
         whole_message = receive_message(client_socket);
         message_split = whole_message["data"].split(CUSTOM_SEPARATOR);
@@ -254,7 +255,7 @@ def recieveEncryptedMessage(client_socket, Chakey):
     except ValueError as ve:
         return {'header': whole_message["header"], 'data': decrypted_message, 'integrity': False};
     except Exception as e:
-        logfilehandle.write("recieveEncryptedMessage(): " + str(e) + "\n");
+        log_file_handle.write("receiveEncryptedMessage(): " + str(e) + "\n");
         return False;
 
 def encode(richstring):
@@ -291,24 +292,24 @@ first_exchange_msg = public + CUSTOM_SEPARATOR + encode(public_hash_hexdigest);
 first_exchange_msg_hashobj = SHA512.new(first_exchange_msg);
 signature = pss.new(RSAKey).sign(first_exchange_msg_hashobj);
 
-IP = str(input("Enter Server IP Address: "));
-while(checkIP(IP) == False):
-    IP = str(input("Enter Server IP Address: "));
-Port = int(input("Enter Socket Port: "));
-while(checkPort(Port) == False):
-    Port = int(input("Enter Socket Port: "));
+ip = str(input("Enter Server IP Address: "));
+while(checkIP(ip) == False):
+    ip = str(input("Enter Server IP Address: "));
+port = int(input("Enter Socket Port: "));
+while(checkPort(port) == False):
+    port = int(input("Enter Socket Port: "));
 user_username = str(input("Username: "));
 
 try:
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM);
     print("Connecting to Server...");
-    client_socket.connect((IP, Port));
+    client_socket.connect((ip, port));
     print(f"{RT.GREEN}Connected!{RT.RESET}");
     client_socket.setblocking(False);
 except BaseException as e:
-    print(f"{RT.RED}Error Occured During Connection Phase!{RT.RESET}");
-    logfilehandle.write("Socket Connection Error: " + str(e) + "\n");
-    logfilehandle.close();
+    print(f"{RT.RED}Error Occurred During Connection Phase!{RT.RESET}");
+    log_file_handle.write("Socket Connection Error: " + str(e) + "\n");
+    log_file_handle.close();
     exit(1);
 
 send_message(client_socket, first_exchange_msg + CUSTOM_SEPARATOR + signature, "byte");
@@ -320,29 +321,29 @@ while(True):
         continue;
     break;
 split = fGet["data"].split(encode("(:0x0:)"));
-toDecrypt = encode('');
+to_decrypt = encode('');
 for i in range(0, len(split) - 1):
-    toDecrypt += split[i];
-serverPublic = split[len(split) - 1];
+    to_decrypt += split[i];
+server_public = split[len(split) - 1];
 intermediate = RSA.import_key(private);
-decrypted = PKCS1_OAEP.new(intermediate).decrypt(toDecrypt);
-splittedDecrypt = decrypted.split(CUSTOM_SEPARATOR);
-ttwoByte = splittedDecrypt[0];
-session_hexdigest = splittedDecrypt[1];
-serverPublicHash = splittedDecrypt[2];
-sess = SHA512.new(ttwoByte);
-sess_hexdigest = sess.hexdigest();
-hashObj = SHA512.new(serverPublic);
-server_public_hash = hashObj.hexdigest();
+decrypted = PKCS1_OAEP.new(intermediate).decrypt(to_decrypt);
+splitted_decrypt = decrypted.split(CUSTOM_SEPARATOR);
+ttwo_byte = splitted_decrypt[0];
+received_session_key_hexdigest = splitted_decrypt[1];
+server_public_hash = splitted_decrypt[2];
+session_key = SHA512.new(ttwo_byte);
+session_key_hexdigest = session_key.hexdigest();
+hash_obj = SHA512.new(server_public);
+server_public_hash = hash_obj.hexdigest();
 
 print(f"{RT.YELLOW}Matching Server's Public Key & ChaCha Key...{RT.RESET}");
-if server_public_hash == serverPublicHash.decode('utf-8') and sess_hexdigest == session_hexdigest.decode('utf-8'):
+if server_public_hash == server_public_hash.decode('utf-8') and session_key_hexdigest == received_session_key_hexdigest.decode('utf-8'):
     print(f"{RT.BLUE}Sending Encrypted Session Key...{RT.RESET}");
-    intermediate = RSA.import_key(serverPublic);
-    serverPublic = PKCS1_OAEP.new(intermediate).encrypt(ttwoByte);
-    send_message(client_socket, serverPublic, "byte");
+    intermediate = RSA.import_key(server_public);
+    server_public = PKCS1_OAEP.new(intermediate).encrypt(ttwo_byte);
+    send_message(client_socket, server_public, "byte");
     print(f"{RT.BLUE}Creating ChaCha Key...{RT.RESET}");
-    key_256 = ttwoByte;
+    key_256 = ttwo_byte;
     try:
         while(True):
             try:
@@ -352,8 +353,8 @@ if server_public_hash == serverPublicHash.decode('utf-8') and sess_hexdigest == 
             break;
     except Exception as e:
         print(f"{RT.RED}Error Occurred During Second Phase Of Handshake Sequence!{RT.RESET}");
-        logfilehandle.write("Handshake Error: " + str(e) + "\n");
-        logfilehandle.close();
+        log_file_handle.write("Handshake Error: " + str(e) + "\n");
+        log_file_handle.close();
         exit(1);
     splitreceived = ready["data"].split(CUSTOM_SEPARATOR);
     ready_msg = ChaChaDecrypt(key_256, splitreceived[1], CHACHA_HEADER, splitreceived[0]);
@@ -414,37 +415,37 @@ def receiver_function(sock):
             if user_data == False:
                 print("Connection Closed By The Server");
                 sys.exit();
-            rusername = user_data["data"];
-            decrypted_message_package = recieveEncryptedMessage(sock, key_256);
+            r_username = user_data["data"];
+            decrypted_message_package = receiveEncryptedMessage(sock, key_256);
             decrypted_message = decrypted_message_package["data"];
             split_decrypted_message = decrypted_message.split(CUSTOM_SEPARATOR);
             if split_decrypted_message[0] == encode("SFTP Initiate"):
                 procedure_lock.clear();
                 print("Incoming File(s)....");
-                dfilename_split = split_decrypted_message[1].decode('utf-8').strip().split(",");
-                dfilename = dfilename_split[:len(dfilename_split) - 1];
+                d_filename_split = split_decrypted_message[1].decode('utf-8').strip().split(",");
+                d_filename = d_filename_split[:len(d_filename_split) - 1];
                 filesize_uc = split_decrypted_message[2];
                 filesize_c = split_decrypted_message[3];
-                DownloadFile(sock, dfilename, key_256, int(filesize_uc), int(filesize_c), 16384);
+                DownloadFile(sock, d_filename, key_256, int(filesize_uc), int(filesize_c), 16384);
                 os.remove("temp.tar.gz");
                 prompt();
                 procedure_lock.set();
                 continue;
             if decrypted_message_package["integrity"]:
-                print(f"{rusername.decode('utf-8')} > [I] {decrypted_message.decode('utf-8')}");
+                print(f"{r_username.decode('utf-8')} > [I] {decrypted_message.decode('utf-8')}");
             else:
-                print(f"{rusername.decode('utf-8')} > [C] {decrypted_message.decode('utf-8')}");
+                print(f"{r_username.decode('utf-8')} > [C] {decrypted_message.decode('utf-8')}");
             prompt();
         except IOError as e:
             if e.errno != errno.EAGAIN and e.errno != errno.EWOULDBLOCK:
                 print("Reading error: {}".format(str(e)));
-                logfilehandle.write("IOError: " + str(e) + "\n");
-                logfilehandle.close();
+                log_file_handle.write("IOError: " + str(e) + "\n");
+                log_file_handle.close();
                 sys.exit();
         except Exception as e:
             print("General Error {}".format(str(e)));
-            logfilehandle.write("General Error: " + str(e) + "\n");
-            logfilehandle.close();
+            log_file_handle.write("General Error: " + str(e) + "\n");
+            log_file_handle.close();
             sys.exit();
 
 procedure_lock = threading.Event();
@@ -455,7 +456,7 @@ Thread(target=receiver_function, args=(client_socket,)).start();
 
 def exit_cleanup():
     print(f"{RT.RED}Exiting Program{RT.RESET}");
-    logfilehandle.close();
+    log_file_handle.close();
     try:
         os.remove("temp.tar.gz");
     except:

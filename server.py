@@ -12,9 +12,9 @@ CUSTOM_SEPARATOR = b':0x0:';
 CHACHA_HEADER = b"header";
 HEADER_LENGTH = 10;
 socket_list = [];
-socket_list_vocom = [];
+socket_list_vo_com = [];
 client_dic = {};
-client_dic_vocom = {};
+client_dic_vo_com = {};
 chacha_client_mapping = {};
 
 class RT:
@@ -64,14 +64,14 @@ def sendEncryptedMessage(client_socket, message, Chakey):
     send_message(client_socket, nonce + message_encrypted + CUSTOM_SEPARATOR + message_tag, type="byte");
 
 def recv_exact(socket, size):
-    buflist = [];
+    buf_list = [];
     while size:
         buf = socket.recv(size);
         if not buf:
             return False;
-        buflist.append(buf);
+        buf_list.append(buf);
         size -= len(buf);
-    return b''.join(buflist);
+    return b''.join(buf_list);
 
 def receive_message(client_socket):
     try:
@@ -88,7 +88,8 @@ def receive_message(client_socket):
         print(e);
         return False;
 
-def recieveEncryptedMessage(client_socket, Chakey, passthrough=False):
+def receiveEncryptedMessage(client_socket, Chakey, passthrough=False):
+    decrypted_message = '';
     try:
         whole_message = receive_message(client_socket);
         message_split = whole_message["data"].split(CUSTOM_SEPARATOR);
@@ -106,15 +107,15 @@ def broadcast(client_socket, user, message, type="byte", socket_array=socket_lis
             try:
                 username_header = encode(f"{len(user):<{HEADER_LENGTH}}");
                 user_socket_key = chacha_client_mapping[socket];
-                ((enc_messge, msg_tag), msg_nonce) = ChaChaEncrypt(user_socket_key, CHACHA_HEADER, message);
-                message_combined = msg_nonce + enc_messge + CUSTOM_SEPARATOR + msg_tag;
+                ((enc_message, msg_tag), msg_nonce) = ChaChaEncrypt(user_socket_key, CHACHA_HEADER, message);
+                message_combined = msg_nonce + enc_message + CUSTOM_SEPARATOR + msg_tag;
                 enc_message_header = encode(f"{len(message_combined):<{HEADER_LENGTH}}");
                 socket.send(username_header + user + enc_message_header + message_combined);
             except:
                 socket.close();
                 socket_list.remove(socket);
 
-def close_connection(socket, sock_list, sock_list_vocom, client_dictionary, client_dictionary_vocom):
+def close_connection(socket, sock_list, sock_list_vo_com, client_dictionary, client_dictionary_vo_com):
     if len(client_dictionary):
         user = client_dictionary[socket]["data"];
         print("Closed connection from: {}".format(user.decode('utf-8')));
@@ -123,16 +124,16 @@ def close_connection(socket, sock_list, sock_list_vocom, client_dictionary, clie
         literal_header = encode(f"{len(literal):<{HEADER_LENGTH}}");
         broadcast(socket, user, literal, type="byte");
         if socket in sock_list: sock_list.remove(socket);
-        if socket in socket_list_vocom: sock_list_vocom.remove(socket);
+        if socket in socket_list_vo_com: sock_list_vo_com.remove(socket);
         if socket in client_dictionary: del client_dictionary[socket];
-        if socket in client_dictionary_vocom: del client_dictionary_vocom[socket];
+        if socket in client_dictionary_vo_com: del client_dictionary_vo_com[socket];
         if socket in chacha_client_mapping: del chacha_client_mapping[socket];
-        return [sock_list, sock_list_vocom, client_dictionary, client_dictionary_vocom];
+        return [sock_list, sock_list_vo_com, client_dictionary, client_dictionary_vo_com];
     else:
         print("Closed connection from: UNKNOWN");
         if socket in sock_list: sock_list.remove(socket);
-        if socket in socket_list_vocom: sock_list_vocom.remove(socket);
-        return [sock_list, sock_list_vocom, client_dictionary, client_dictionary_vocom];
+        if socket in socket_list_vo_com: sock_list_vo_com.remove(socket);
+        return [sock_list, sock_list_vo_com, client_dictionary, client_dictionary_vo_com];
     
 def encode(richstring):
     return richstring.encode('utf-8');
@@ -155,9 +156,9 @@ def checkPort(port):
 
 hasher = SHA512.new();
 random_generator = Random.new();
-RSAkey = RSA.generate(4096, random_generator.read);
-public = RSAkey.publickey().exportKey('DER');
-private = RSAkey.exportKey('DER');
+RSA_key = RSA.generate(4096, random_generator.read);
+public = RSA_key.publickey().exportKey('DER');
+private = RSA_key.exportKey('DER');
 public_hash = SHA512.new(public);
 public_hash_hexdigest = public_hash.hexdigest();
 
@@ -175,14 +176,14 @@ try:
     print("Binding to socket tuple...");
     server_socket.bind((IP, Port));
     server_socket.listen();
-    print(f"{RT.GREEN}Successfully Binded!{RT.RESET}");
+    print(f"{RT.GREEN}Successfully Bound!{RT.RESET}");
 except Exception as e:
     print(f"{RT.RED}Error In The Binding Process!{RT.RESET}");
     print(e);
     exit(1);
 
 socket_list.append(server_socket);
-socket_list_vocom.append(server_socket);
+socket_list_vo_com.append(server_socket);
 
 print(f"{RT.GREEN}Server Connection Successfully Setup!{RT.RESET}");
 print(f"{RT.MAGENTA}Listening for connections on {IP}:{Port}...{RT.RESET}");
@@ -213,15 +214,15 @@ while(True):
                     print(f"{RT.CYAN}Client Signature Verified!{RT.RESET}");
                 except (ValueError, TypeError):
                     print(f"{RT.RED}Could Not Verify Client's Signature! Rejecting Connection!{RT.RESET}");
-                    close_connection(client_socket, socket_list, socket_list_vocom, client_dic, client_dic_vocom);
+                    close_connection(client_socket, socket_list, socket_list_vo_com, client_dic, client_dic_vo_com);
                     continue;
-                pkclient = PKCS1_OAEP.new(clientPublic);
+                pk_client = PKCS1_OAEP.new(clientPublic);
                 ttwoByte = os.urandom(32);
                 session = SHA512.new(ttwoByte);
                 session_hexdigest = session.hexdigest();
                 chacha_client_mapping[client_socket] = ttwoByte;
                 fSend = ttwoByte + CUSTOM_SEPARATOR + encode(session_hexdigest) + CUSTOM_SEPARATOR + encode(public_hash_hexdigest);
-                fSend = pkclient.encrypt(fSend);
+                fSend = pk_client.encrypt(fSend);
                 temp = fSend + encode("(:0x0:)") + public;
                 try:
                     send_message(client_socket, temp, "byte");
@@ -247,10 +248,10 @@ while(True):
                         ((client_msg, tag), nonce) = ChaChaEncrypt(key_256, CHACHA_HEADER, encode("Ready"));
                         send_message(client_socket, nonce + client_msg + CUSTOM_SEPARATOR + tag, "byte");
                         print(f"{RT.BLUE}Waiting For Client's Username...{RT.RESET}");
-                        user = recieveEncryptedMessage(client_socket, key_256);
+                        user = receiveEncryptedMessage(client_socket, key_256);
                         if user is False:
                             print(f"{RT.RED}Error While receiving username! Halting Handshake{RT.RESET}");
-                            close_connection(client_socket, socket_list, socket_list_vocom, client_dic, client_dic_vocom);
+                            close_connection(client_socket, socket_list, socket_list_vo_com, client_dic, client_dic_vo_com);
                             continue;
                         socket_list.append(client_socket);
                         client_dic[client_socket] = user;
@@ -261,39 +262,39 @@ while(True):
                         broadcast(client_socket, user["data"], literal, type="byte");
                     else:
                         print(f"{RT.RED}Session Key From Client Does Not Match!{RT.RESET}");
-                        close_connection(client_socket, socket_list, socket_list_vocom, client_dic, client_dic_vocom);
+                        close_connection(client_socket, socket_list, socket_list_vo_com, client_dic, client_dic_vo_com);
                         continue;
             else:
                 print(f"{RT.RED}Could Not Match Client's Public Hash! Exiting...{RT.RESET}");
-                close_connection(client_socket, socket_list, socket_list_vocom, client_dic, client_dic_vocom);
+                close_connection(client_socket, socket_list, socket_list_vo_com, client_dic, client_dic_vo_com);
                 continue;
         else:
             user = client_dic[socket];
             user_key = chacha_client_mapping[socket];
-            if socket in client_dic_vocom:
-                decrypted_message = recieveEncryptedMessage(socket, user_key, True);
+            if socket in client_dic_vo_com:
+                decrypted_message = receiveEncryptedMessage(socket, user_key, True);
                 if decrypted_message is False:
-                    close_connection(socket, socket_list, socket_list_vocom, client_dic, client_dic_vocom);
+                    close_connection(socket, socket_list, socket_list_vo_com, client_dic, client_dic_vo_com);
                     continue;
-                broadcast(socket, user["data"], decrypted_message["data"], "byte", socket_list_vocom);
+                broadcast(socket, user["data"], decrypted_message["data"], "byte", socket_list_vo_com);
                 continue;
-            decrypted_message = recieveEncryptedMessage(socket, user_key);
+            decrypted_message = receiveEncryptedMessage(socket, user_key);
             if decrypted_message is False:
-                close_connection(socket, socket_list, socket_list_vocom, client_dic, client_dic_vocom);
+                close_connection(socket, socket_list, socket_list_vo_com, client_dic, client_dic_vo_com);
                 continue;
             elif decrypted_message["data"][:13] == b'SFTP Initiate':
                 print(f'Received message from {user["data"].decode("utf-8")}: [{str(decrypted_message["integrity"])}] {decrypted_message["data"]}'); #removed ["data"] for user
                 broadcast(socket, user["data"], decrypted_message["data"], "byte");
-                decrypted_message = recieveEncryptedMessage(socket, user_key, True);
+                decrypted_message = receiveEncryptedMessage(socket, user_key, True);
                 while not (decrypted_message["data"][:8] == encode('SFTP END')):
                     broadcast(socket, user["data"], decrypted_message["data"], "byte");
-                    decrypted_message = recieveEncryptedMessage(socket, user_key, True);
+                    decrypted_message = receiveEncryptedMessage(socket, user_key, True);
                 print(f'Received message from {user["data"].decode("utf-8")}: [{str(decrypted_message["integrity"])}] {decrypted_message["data"]}'); #removed ["data"] for user
                 broadcast(socket, user["data"], decrypted_message["data"], "byte");
                 continue;
             elif decrypted_message["data"][:14] == b'VoCom Initiate':
-                client_dic_vocom[socket] = user;
-                socket_list_vocom.append(socket);
+                client_dic_vo_com[socket] = user;
+                socket_list_vo_com.append(socket);
                 continue;
             print(f'Received message from {user["data"].decode("utf-8")}: [{str(decrypted_message["integrity"])}] {decrypted_message["data"]}'); #removed ["data"] for user
             if decrypted_message["integrity"]:
@@ -301,4 +302,4 @@ while(True):
             else:
                 continue;
     for socket in exception_sockets:
-        close_connection(socket, socket_list, socket_list_vocom, client_dic, client_dic_vocom);
+        close_connection(socket, socket_list, socket_list_vo_com, client_dic, client_dic_vo_com);
