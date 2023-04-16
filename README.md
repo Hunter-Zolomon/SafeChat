@@ -1,12 +1,12 @@
 # SafeChat
 
-SafeChat is a TCP/IP socket chat program with RSA handshake protocol, AES symmetric encryption, and SHA512 hashing. It supports multi client encryption and communication.
+SafeChat is a TCP/IP socket chat program with ECDHE(also known as EECDH) handshake protocol, ChaCha20-Poly1305 symmetric encryption, and SHA3-512 hashing. It supports multi client encryption and communication.
 
 This program was created purely for the demonstration of simple cryptography and socket programming concepts. It is not intended for commercial use!
 
 # Library Dependancies
 
-  - PyCryptoDomex (Download Link: https://pypi.org/project/pycryptodomex/)
+  - Cryptography (Download Link: https://pypi.org/project/cryptography/)
   - Rich (Download Link: https://pypi.org/project/rich/)
   - Sounddevice (Download Link: https://pypi.org/project/sounddevice/)
   
@@ -20,7 +20,7 @@ Every client has to run the client module in order to connect to the server and 
 You will be asked to enter the IP address of the interface, a static Port and a username as an identifier in the chatroom. When you see the prompt `<You>`, you can start sending/receiving messages.
 
 # Future Plans
-1. Increased security through improved encryption protocol (Forward Secrecy, EC).
+1. Increased security through improved encryption protocol (Forward Secrecy, EC)(Currently in Alpha).
 2. Dynamic send/receive collision aversion.
 3. Data Integrity (Hash Check/HMAC)(Currently in Alpha).
 4. File transfer capabilities(Currently in Alpha).
